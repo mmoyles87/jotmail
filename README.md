@@ -1,18 +1,19 @@
 # jotmail
 
-The iPhone's IMAP notes, in a terminal.
+Notes from your IMAP mailbox, in a terminal.
 
-When an iPhone syncs Notes with an IMAP account (Settings → Mail → Accounts → *account* → Notes),
-each note is stored as an HTML email in the account's `Notes` folder. jotmail reads and writes
-that folder directly: no sync service, no server component, and edits show up on the phone as
-edits, not duplicates.
+A mail account can hold notes as well as mail. Apple Notes on iPhone, iPad and Mac syncs notes
+to any IMAP account, Fastmail has notes built into its web app, and ImapNotes3 does the same on
+Android. All of them keep each note as an HTML message in the account's `Notes` folder, in the
+format Apple Notes defined. jotmail reads and writes that folder directly: no sync service, no
+server component, and Apple Notes sees an edit made in jotmail as an edit, not a duplicate.
 
 ![jotmail showing a note with an image](docs/screenshot.png)
 
 - Browse, search, edit and delete notes in a two-pane terminal UI; notes open in `$EDITOR` as Markdown.
 - Images in notes are shown inline in kitty and Ghostty, including inside tmux. Add one by
   pasting it from the clipboard, or by writing its path in the note.
-- If a note changes on the phone while you edit it, the save is refused and your text is kept.
+- If a note changes elsewhere while you edit it, the save is refused and your text is kept.
 - Scriptable: `list`, `show`, `new`, `edit` and `rm` work without the UI.
 
 ## Build
@@ -48,7 +49,7 @@ folder = "Notes"                                     # optional
 `password_command` runs through `/bin/sh`, so `pass`, `secret-tool`,
 `security find-internet-password -w` or `op read` all work.
 
-## Try it without an iPhone
+## Try it with sample notes
 
 `tools/demo/demo up` starts a throwaway IMAP server in Docker, fills its `Notes` folder with
 sample notes and writes a config for it (it needs Docker, OpenSSL and Python 3):

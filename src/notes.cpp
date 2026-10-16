@@ -97,7 +97,7 @@ std::string base64_lines(const std::string& bytes) {
     return out + line;
 }
 
-// An image part as iOS writes one, without the delimiter line.
+// An image part as Apple Notes writes one, without the delimiter line.
 std::string image_part(const NewImage& img) {
     return "Content-Transfer-Encoding: base64\r\nContent-Disposition: inline;\r\n\tfilename=\"" + img.filename +
            "\"\r\nContent-Type: " + img.type + ";\r\n\tname=\"" + img.filename + "\"\r\nContent-Id: <" + img.cid +

@@ -20,7 +20,7 @@
 
 namespace {
 
-const char* USAGE = R"(jotmail: the iPhone's IMAP notes in a terminal
+const char* USAGE = R"(jotmail: notes from your IMAP mailbox, in a terminal
 
 usage:
   jotmail [options]                    browse and edit notes

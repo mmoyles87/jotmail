@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fill the demo server's Notes folder with sample notes, written the way iOS writes them.
+"""Fill the demo server's Notes folder with sample notes, written the way Apple Notes writes them.
 
     seed.py HOST PORT CA_FILE
 

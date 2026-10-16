@@ -48,7 +48,7 @@ std::pair<std::string, std::vector<NewImage>> attach_files(const std::string& md
 // The content ids of the [attachment:<cid>] lines in md.
 std::vector<std::string> attachment_ids(const std::string& md);
 
-// A new note as iOS writes it: text/html, or multipart/related when it has images.
+// A new note as Apple Notes writes it: text/html, or multipart/related when it has images.
 std::string build_note(const std::string& md, const std::string& uuid, const std::string& created,
                        const std::string& from, std::time_t now, const std::vector<NewImage>& images = {});
 
@@ -57,7 +57,7 @@ std::string build_note(const std::string& md, const std::string& uuid, const std
 std::string rebuild_note(const std::string& raw, const std::string& md, const std::string& domain, std::time_t now,
                          const std::vector<NewImage>& images = {});
 
-std::string new_uuid();  // uppercase v4, as iOS writes
+std::string new_uuid();  // uppercase v4, as Apple Notes writes
 
 class Notes {
 public:

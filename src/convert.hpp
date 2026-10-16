@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Note HTML <-> Markdown, for the subset iOS writes: divs, h1-h3, b/i, links, lists, images.
+// Note HTML <-> Markdown, for the subset Apple Notes writes: divs, h1-h3, b/i, links, lists, images.
 #pragma once
 
 #include <string>

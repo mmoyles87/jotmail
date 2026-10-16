@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A local IMAP server with sample notes, for trying jotmail without an iPhone.
+# A local IMAP server with sample notes, for trying jotmail without setting up notes on an account.
 #
 #   tools/demo/demo up     start the server (Docker), seed it, write a jotmail config
 #   tools/demo/demo down   stop and remove the server and its files
