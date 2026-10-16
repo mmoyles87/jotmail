@@ -2,6 +2,9 @@
 #include "tui.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <deque>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -90,7 +93,10 @@ std::vector<std::string> chop(const std::string& s, int cols) {
 
 // A line with its inline formatting, word-wrapped to `width` columns. The wrapping is done here
 // rather than with hflow, whose height inside a vbox is not reliable.
-Element styled(const std::string& line, Color base, int width) {
+// Where each link is on screen after the frame is drawn, for clicks.
+using LinkBoxes = std::deque<std::pair<Box, std::string>>;
+
+Element styled(const std::string& line, Color base, int width, LinkBoxes& links) {
     width = std::max(width, 1);
     Elements rows, row;
     int used = 0;
@@ -116,8 +122,10 @@ Element styled(const std::string& line, Color base, int width) {
                     e = e | bold;
                 if (span.italic)
                     e = e | italic;
-                if (span.link)
-                    e = e | underlined | color(T.link);
+                if (span.link) {
+                    links.emplace_back(Box{}, span.url);
+                    e = e | underlined | color(T.link) | hyperlink(span.url) | reflect(links.back().first);
+                }
                 row.push_back(e);
                 used += w;
             }
@@ -133,9 +141,11 @@ Element styled(const std::string& line, Color base, int width) {
 
 class Browser {
 public:
-    Browser(const Account& account, kitty::Support images, std::string paste_command)
-        : store_(account), notes_(store_), images_(images), screen_(ScreenInteractive::Fullscreen()),
-          paste_command_(std::move(paste_command)) {}
+    Browser(const Account& account, kitty::Support images, std::string paste_command, bool mouse)
+        : store_(account), notes_(store_), images_(images), paste_command_(std::move(paste_command)),
+          screen_(ScreenInteractive::Fullscreen()) {
+        screen_.TrackMouse(mouse);
+    }
 
     int run() {
         if (images_.enabled())
@@ -153,6 +163,15 @@ private:
     kitty::Images images_;
     std::string paste_command_;
     ScreenInteractive screen_;
+
+    // Where things were drawn in the last frame, for mouse hit-testing. Deques, so the boxes
+    // reflect() writes into stay put while the frame is built.
+    std::deque<Box> item_boxes_;
+    Box list_box_, preview_box_, search_box_;
+    LinkBoxes links_;
+    std::deque<std::pair<Box, Event>> buttons_;
+    int last_click_item_ = -1;
+    std::chrono::steady_clock::time_point last_click_;
 
     std::vector<Note> all_;
     std::vector<size_t> shown_;  // indices into all_
@@ -286,7 +305,63 @@ private:
         }
     }
 
+    // Clicks select notes, press footer buttons, open links and focus the search bar; the wheel
+    // scrolls the note under it or moves through the list. A double click edits a note.
+    bool on_mouse(Event e) {
+        const Mouse& m = e.mouse();
+        if (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) {
+            int dir = m.button == Mouse::WheelDown ? 1 : -1;
+            if (preview_box_.Contain(m.x, m.y))
+                scroll_ = std::max(0, scroll_ + 3 * dir);
+            else if (list_box_.Contain(m.x, m.y))
+                select(selected_ + dir);
+            return true;
+        }
+        if (m.button != Mouse::Left || m.motion != Mouse::Pressed)
+            return false;
+        if (search_box_.Contain(m.x, m.y)) {
+            filtering_ = true;
+            return true;
+        }
+        filtering_ = false;
+        for (auto& [box, ev] : buttons_)
+            if (box.Contain(m.x, m.y))
+                return on_event(ev);
+        for (auto& [box, url] : links_)
+            if (box.Contain(m.x, m.y)) {
+                open_url(url);
+                return true;
+            }
+        if (list_box_.Contain(m.x, m.y))
+            for (size_t k = 0; k < item_boxes_.size(); ++k)
+                if (item_boxes_[k].Contain(m.x, m.y)) {
+                    auto now = std::chrono::steady_clock::now();
+                    bool twice = static_cast<int>(k) == last_click_item_ && now - last_click_ < std::chrono::milliseconds(400);
+                    last_click_item_ = twice ? -1 : static_cast<int>(k), last_click_ = now;
+                    select(static_cast<int>(k));
+                    return twice ? on_event(Event::Character('e')) : true;
+                }
+        return true;
+    }
+
+    void open_url(const std::string& url) {
+        const char* browser = std::getenv("BROWSER");
+#ifdef __APPLE__
+        std::string opener = browser && *browser ? browser : "open";
+#else
+        std::string opener = browser && *browser ? browser : "xdg-open";
+#endif
+        std::string quoted = "'";
+        for (char c : url)
+            quoted += c == '\'' ? std::string("'\\''") : std::string(1, c);
+        quoted += "'";
+        std::system((opener + " " + quoted + " >/dev/null 2>&1 &").c_str());
+        status_ = "opened " + url;
+    }
+
     bool on_event(const Event& e) {
+        if (e.is_mouse())
+            return on_mouse(e);
         if (filtering_) {
             if (e == Event::Return || e == Event::ArrowDown) {
                 filtering_ = false;
@@ -368,11 +443,12 @@ private:
     // --- drawing ------------------------------------------------------------------
 
     Element render() {
+        item_boxes_.clear(), links_.clear(), buttons_.clear();
         Element bar = text(" Notes · " + store_.account().user + " · " + status_) | color(T.status) | bgcolor(T.panel);
         Element search = filtering_    ? hbox(text(" /" + filter_) | color(T.text), text("▏") | color(T.accent))
                          : filter_.empty() ? text(" / search notes") | color(T.muted)
                                            : text(" /" + filter_) | color(T.text);
-        search = search | bgcolor(filtering_ ? T.highlight : T.search);
+        search = search | bgcolor(filtering_ ? T.highlight : T.search) | reflect(search_box_);
 
         Elements items;
         for (size_t k = 0; k < shown_.size(); ++k) {
@@ -382,17 +458,29 @@ private:
                 text(" " + fit(n.title + (n.attachments ? " 📎" : ""), LIST_WIDTH - 2)) | bold | color(sel ? T.selected_text : T.text),
                 text(" " + when(n.date)) | color(sel ? T.selected_text : T.muted),
             });
-            item = item | bgcolor(sel ? T.accent : T.panel);
+            item_boxes_.emplace_back();
+            item = item | bgcolor(sel ? T.accent : T.panel) | reflect(item_boxes_.back());
             if (sel)
                 item = item | focus;
             items.push_back(item);
         }
         if (items.empty())
             items.push_back(text(""));
-        Element list = vbox(std::move(items)) | yframe | vscroll_indicator | size(WIDTH, EQUAL, LIST_WIDTH) | bgcolor(T.panel);
+        Element list = vbox(std::move(items)) | yframe | vscroll_indicator | size(WIDTH, EQUAL, LIST_WIDTH) | bgcolor(T.panel) |
+                       reflect(list_box_);
 
-        Element footer = text(" e edit · n new · p paste image · d delete · / search · r refresh · J/K scroll · q quit") | color(T.muted) | bgcolor(T.panel);
-        return vbox({bar, search, hbox({list, separator() | color(T.highlight), preview() | flex}) | flex, footer}) | bgcolor(T.background);
+        // the footer's hints are buttons too
+        Elements hints{text(" ")};
+        for (auto [label, key] : {std::pair{"e edit", 'e'}, {"n new", 'n'}, {"p paste image", 'p'}, {"d delete", 'd'},
+                                  {"/ search", '/'}, {"r refresh", 'r'}, {"q quit", 'q'}}) {
+            buttons_.emplace_back(Box{}, Event::Character(key));
+            hints.push_back(text(label) | reflect(buttons_.back().first));
+            hints.push_back(text(" · "));
+        }
+        hints.push_back(text("J/K scroll"));
+        Element footer = hbox(std::move(hints)) | color(T.muted) | bgcolor(T.panel);
+        Element note = preview() | flex | reflect(preview_box_);
+        return vbox({bar, search, hbox({list, separator() | color(T.highlight), note}) | flex, footer}) | bgcolor(T.background);
     }
 
     Element preview() {
@@ -427,12 +515,12 @@ private:
             while (h < line.size() && h < 3 && line[h] == '#')
                 ++h;
             if (h > 0 && h < line.size() && line[h] == ' ') {
-                rows.push_back(styled(line.substr(h + 1), h == 1 ? T.accent : T.link, width) | bold);
+                rows.push_back(styled(line.substr(h + 1), h == 1 ? T.accent : T.link, width, links_) | bold);
                 continue;
             }
             size_t indent = line.find_first_not_of(' ');
             if (indent != std::string::npos && (line.compare(indent, 2, "- ") == 0 || line.compare(indent, 2, "* ") == 0)) {
-                rows.push_back(hbox({text("  • ") | color(T.accent), styled(line.substr(indent + 2), T.text, width - 4) | flex}));
+                rows.push_back(hbox({text("  • ") | color(T.accent), styled(line.substr(indent + 2), T.text, width - 4, links_) | flex}));
                 continue;
             }
             if (indent != std::string::npos) {
@@ -441,11 +529,11 @@ private:
                     ++d;
                 if (d > indent && d + 1 < line.size() && (line[d] == '.' || line[d] == ')') && line[d + 1] == ' ') {
                     rows.push_back(hbox({text("  " + line.substr(indent, d - indent + 1) + " ") | color(T.accent),
-                                         styled(line.substr(d + 2), T.text, width - 6) | flex}));
+                                         styled(line.substr(d + 2), T.text, width - 6, links_) | flex}));
                     continue;
                 }
             }
-            rows.push_back(styled(line, T.text, width));
+            rows.push_back(styled(line, T.text, width, links_));
         }
         scroll_ = std::min(scroll_, std::max(0, static_cast<int>(rows.size()) - 1));
         Elements visible(rows.begin() + scroll_, rows.end());
@@ -470,7 +558,7 @@ private:
 
 int run_tui(const Account& account, const Config& config) {
     T = make_theme(config.theme_preset, config.theme_colors);
-    Browser browser(account, kitty::detect(config.images), config.paste_command);
+    Browser browser(account, kitty::detect(config.images), config.paste_command, config.mouse);
     return browser.run();
 }
 

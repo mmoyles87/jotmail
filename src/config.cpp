@@ -35,6 +35,7 @@ Config Config::load(const std::filesystem::path& path) {
     if (c.images != "auto" && c.images != "kitty" && c.images != "off")
         throw std::runtime_error(path.string() + ": images must be \"auto\", \"kitty\" or \"off\"");
     c.paste_command = t["paste_command"].value_or(std::string{});
+    c.mouse = t["mouse"].value_or(true);
     if (auto* theme = t["theme"].as_table()) {
         for (auto& [key, node] : *theme) {
             auto v = node.value<std::string>();

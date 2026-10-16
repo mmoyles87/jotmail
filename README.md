@@ -35,6 +35,7 @@ Run the tests with `ctest --test-dir build`.
 ```toml
 default = "personal"
 images = "auto"                                      # "auto", "kitty" or "off"
+mouse = true                                         # false: keep the terminal's own text selection
 # paste_command = "wl-paste --type image/png"        # optional; see Images
 
 [accounts.personal]
@@ -83,6 +84,11 @@ jotmail rm 3                # move to Trash
 | `J` `K`, `PgDn` `PgUp` | scroll the note |
 | `r` | reload |
 | `q` | quit |
+
+With the mouse: click a note to select it and double-click to edit it, scroll the list or the
+note with the wheel, click the search bar to search, click a link to open it (in `$BROWSER`, or
+`xdg-open` / `open`), and click the hints along the bottom. While jotmail has the mouse, most
+terminals still select text with Shift held down.
 
 A note's text is Markdown: `#` headings, `**bold**`, `*italic*`, `- ` and `1. ` lists and links.
 An image appears as an `[attachment:…]` line; keep the line to keep the image, delete it to

@@ -15,6 +15,7 @@ std::string md_to_html(std::string_view md);
 struct Span {
     std::string text;
     bool bold = false, italic = false, link = false;
+    std::string url;  // for a link
 };
 std::vector<Span> inline_spans(std::string_view line);
 

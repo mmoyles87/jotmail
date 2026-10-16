@@ -20,6 +20,7 @@ struct Account {
 struct Config {
     std::string default_account;
     std::string images = "auto";  // "auto", "kitty" or "off"
+    bool mouse = true;            // clicks and the wheel; false keeps the terminal's own selection
     std::string paste_command;    // prints the clipboard's image; empty: wl-paste, xclip or pngpaste
     std::string theme_preset = "forest";
     std::map<std::string, std::string> theme_colors;  // [theme] keys other than preset

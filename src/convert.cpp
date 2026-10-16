@@ -250,14 +250,14 @@ void inline_spans(const std::u32string& text, bool bold, bool italic, std::vecto
     size_t pos = 0, p = 0;
     auto plain = [&](size_t a, size_t b) {
         if (b > a)
-            out.push_back({utf8_encode(text.substr(a, b - a)), bold, italic, false});
+            out.push_back({utf8_encode(text.substr(a, b - a)), bold, italic, false, {}});
     };
     while (p < text.size()) {
         if (auto m = inline_at(text, p)) {
             plain(pos, p);
             switch (m->kind) {
                 case InlineMatch::Link:
-                case InlineMatch::Url: out.push_back({utf8_encode(m->text), bold, italic, true}); break;
+                case InlineMatch::Url: out.push_back({utf8_encode(m->text), bold, italic, true, utf8_encode(m->url)}); break;
                 case InlineMatch::Bold: inline_spans(m->text, true, italic, out); break;
                 case InlineMatch::Italic: inline_spans(m->text, bold, true, out); break;
             }
