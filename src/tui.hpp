@@ -7,7 +7,7 @@
 
 namespace jotmail {
 
-// The note browser. `images` is the config's images setting. Returns the exit status.
-int run_tui(const Account& account, const std::string& images);
+// The note browser. Returns the exit status.
+int run_tui(const Account& account, const Config& config);
 
 }  // namespace jotmail

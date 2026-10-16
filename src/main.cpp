@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
             acc.folder = folder;
 
         if (args.empty())
-            return jotmail::run_tui(acc, config.images);
+            return jotmail::run_tui(acc, config);
 
         jotmail::Store store(acc);
         jotmail::Notes notes(store);

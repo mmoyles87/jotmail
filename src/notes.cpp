@@ -2,6 +2,9 @@
 #include "notes.hpp"
 
 #include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <optional>
 #include <random>
@@ -75,7 +78,115 @@ std::optional<std::string> boundary_of(const std::string& content_type) {
     return content_type.substr(p, e == std::string::npos ? std::string::npos : e - p);
 }
 
+std::string base64_lines(const std::string& bytes) {
+    static const char* B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out, line;
+    for (size_t i = 0; i < bytes.size(); i += 3) {
+        unsigned v = static_cast<unsigned char>(bytes[i]) << 16;
+        if (i + 1 < bytes.size()) v |= static_cast<unsigned char>(bytes[i + 1]) << 8;
+        if (i + 2 < bytes.size()) v |= static_cast<unsigned char>(bytes[i + 2]);
+        line += B64[v >> 18 & 63];
+        line += B64[v >> 12 & 63];
+        line += i + 1 < bytes.size() ? B64[v >> 6 & 63] : '=';
+        line += i + 2 < bytes.size() ? B64[v & 63] : '=';
+        if (line.size() == 76) {
+            out += line + "\r\n";
+            line.clear();
+        }
+    }
+    return out + line;
+}
+
+// An image part as iOS writes one, without the delimiter line.
+std::string image_part(const NewImage& img) {
+    return "Content-Transfer-Encoding: base64\r\nContent-Disposition: inline;\r\n\tfilename=\"" + img.filename +
+           "\"\r\nContent-Type: " + img.type + ";\r\n\tname=\"" + img.filename + "\"\r\nContent-Id: <" + img.cid +
+           ">\r\n\r\n" + base64_lines(img.bytes);
+}
+
+std::string html_part(const std::string& md) {
+    return "Content-Transfer-Encoding: quoted-printable\r\nContent-Type: text/html;\r\n\tcharset=utf-8\r\n\r\n" +
+           encode_quoted_printable(md_to_html(md));
+}
+
+// The image type from the file's first bytes.
+std::optional<std::string> image_type(const std::string& b) {
+    if (b.starts_with("\x89PNG\r\n\x1a\n")) return "image/png";
+    if (b.starts_with("\xFF\xD8\xFF")) return "image/jpeg";
+    if (b.starts_with("GIF87a") || b.starts_with("GIF89a")) return "image/gif";
+    if (b.size() > 12 && b.starts_with("RIFF") && b.compare(8, 4, "WEBP") == 0) return "image/webp";
+    if (b.size() > 12 && b.compare(4, 4, "ftyp") == 0) {
+        std::string brand = b.substr(8, 4);
+        if (brand == "heic" || brand == "heix" || brand == "mif1" || brand == "msf1" || brand == "hevc") return "image/heic";
+    }
+    return std::nullopt;
+}
+
+// A filename safe to put in a quoted header parameter: printable ASCII, no quotes or backslashes.
+std::string safe_filename(const std::string& name) {
+    std::string out;
+    for (unsigned char c : name)
+        out += (c >= 32 && c < 127 && c != '"' && c != '\\') ? static_cast<char>(c) : '_';
+    return out.empty() ? "image" : out;
+}
+
 }  // namespace
+
+std::vector<std::string> attachment_ids(const std::string& md) {
+    std::vector<std::string> out;
+    size_t a = 0;
+    while (a < md.size()) {
+        size_t e = md.find('\n', a);
+        std::string line = md.substr(a, e == std::string::npos ? std::string::npos : e - a);
+        if (line.starts_with("[attachment:")) {
+            size_t close = line.rfind(']');
+            if (close != std::string::npos && close > 12 && line.find_first_not_of(" \t\r", close + 1) == std::string::npos)
+                out.push_back(line.substr(12, close - 12));
+        }
+        if (e == std::string::npos)
+            break;
+        a = e + 1;
+    }
+    return out;
+}
+
+std::pair<std::string, std::vector<NewImage>> attach_files(const std::string& md, const std::vector<std::string>& existing) {
+    std::string out;
+    std::vector<NewImage> images;
+    size_t a = 0;
+    while (a <= md.size()) {
+        size_t e = md.find('\n', a);
+        std::string line = md.substr(a, e == std::string::npos ? std::string::npos : e - a);
+        auto ids = attachment_ids(line);
+        if (ids.size() == 1 && std::find(existing.begin(), existing.end(), ids[0]) == existing.end()) {
+            std::string target = ids[0];
+            bool is_path = target.starts_with("/") || target.starts_with("~") || target.starts_with("./") ||
+                           target.starts_with("../") || target.find('/') != std::string::npos;
+            if (is_path) {
+                std::string path = target;
+                if (path.starts_with("~/") || path == "~")
+                    if (const char* home = std::getenv("HOME"))
+                        path = std::string(home) + path.substr(1);
+                std::ifstream f(path, std::ios::binary);
+                if (!f)
+                    throw std::runtime_error("no image at " + target);
+                std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                auto type = image_type(bytes);
+                if (!type)
+                    throw std::runtime_error(target + " is not a PNG, JPEG, GIF, WebP or HEIC image");
+                NewImage img{new_uuid(), *type, safe_filename(std::filesystem::path(path).filename().string()), std::move(bytes)};
+                line = "[attachment:" + img.cid + "]";
+                images.push_back(std::move(img));
+            }
+        }
+        out += line;
+        if (e == std::string::npos)
+            break;
+        out += "\n";
+        a = e + 1;
+    }
+    return {out, images};
+}
 
 std::string new_uuid() {
     static std::mt19937_64 rng{std::random_device{}()};
@@ -131,22 +242,33 @@ std::vector<Note> parse_notes(const std::vector<RawNote>& raw) {
 }
 
 std::string build_note(const std::string& md, const std::string& uuid, const std::string& created,
-                       const std::string& from, std::time_t now) {
+                       const std::string& from, std::time_t now, const std::vector<NewImage>& images) {
+    std::string boundary = "Apple-Mail=_" + new_uuid();
     std::string h;
     h += "From: " + from + "\r\n";
     h += "X-Uniform-Type-Identifier: com.apple.mail-note\r\n";
-    h += "Content-Type: text/html;\r\n\tcharset=utf-8\r\n";
-    h += "Content-Transfer-Encoding: quoted-printable\r\n";
+    if (images.empty()) {
+        h += "Content-Type: text/html;\r\n\tcharset=utf-8\r\n";
+        h += "Content-Transfer-Encoding: quoted-printable\r\n";
+    } else {
+        h += "Content-Type: multipart/related;\r\n\ttype=\"text/html\";\r\n\tboundary=\"" + boundary + "\"\r\n";
+    }
     h += "Mime-Version: 1.0 (jotmail)\r\n";
     h += "Date: " + format_date(now) + "\r\n";
     h += "X-Mail-Created-Date: " + created + "\r\n";
     h += "Subject: " + encode_subject(title_of(md)) + "\r\n";
     h += std::string(UUID_HDR) + ": " + uuid + "\r\n";
     h += "Message-Id: <" + new_uuid() + "@" + domain_of(from) + ">\r\n";
-    return h + "\r\n" + encode_quoted_printable(md_to_html(md));
+    if (images.empty())
+        return h + "\r\n" + encode_quoted_printable(md_to_html(md));
+    std::string body = "--" + boundary + "\r\n" + html_part(md) + "\r\n";
+    for (auto& img : images)
+        body += "--" + boundary + "\r\n" + image_part(img) + "\r\n";
+    return h + "\r\n" + body + "--" + boundary + "--\r\n";
 }
 
-std::string rebuild_note(const std::string& raw, const std::string& md, const std::string& domain, std::time_t now) {
+std::string rebuild_note(const std::string& raw, const std::string& md, const std::string& domain, std::time_t now,
+                         const std::vector<NewImage>& images) {
     size_t head_end = raw.find("\r\n\r\n");
     if (head_end == std::string::npos)
         throw std::runtime_error("the note has no header/body separator");
@@ -219,13 +341,14 @@ std::string rebuild_note(const std::string& raw, const std::string& md, const st
             std::string fresh;
             for (auto& f : other)
                 fresh += f;
-            fresh += "Content-Transfer-Encoding: quoted-printable\r\nContent-Type: text/html;\r\n\tcharset=utf-8\r\n\r\n";
-            fresh += encode_quoted_printable(md_to_html(md));
+            fresh += html_part(md);
             out_body += delim + "\r\n" + fresh + "\r\n";
         } else if (!cid.empty() && kept.count(cid)) {
             out_body += delim + "\r\n" + part + "\r\n";
         }
     }
+    for (auto& img : images)
+        out_body += delim + "\r\n" + image_part(img) + "\r\n";
     out_body += body.substr(at.back());  // the closing delimiter and epilogue
 
     std::string head;
@@ -250,15 +373,16 @@ void Notes::save(const Note* note, const std::string& md) {
         if (!found.empty() && *std::max_element(found.begin(), found.end()) != note->uid)
             throw Conflict(note->title);
     }
+    auto [text, images] = attach_files(md, note ? attachment_ids(note->md) : std::vector<std::string>{});
     const std::string& user = store_.account().user;
     std::time_t now = std::time(nullptr);
     std::string raw;
     if (note && !note->raw.empty()) {
-        raw = rebuild_note(note->raw, md, domain_of(user), now);
+        raw = rebuild_note(note->raw, text, domain_of(user), now, images);
     } else {
         std::string uuid = note && !note->uuid.starts_with("no-uuid-") ? note->uuid : new_uuid();
         std::string created = note ? note->created : format_date(now);
-        raw = build_note(md, uuid, created, user, now);
+        raw = build_note(text, uuid, created, user, now, images);
     }
     store_.append(raw);
     if (note)

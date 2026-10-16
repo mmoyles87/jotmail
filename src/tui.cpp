@@ -3,10 +3,13 @@
 
 #include <algorithm>
 #include <ctime>
+#include <fstream>
 #include <map>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <unistd.h>
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
@@ -20,7 +23,9 @@
 #include "kitty.hpp"
 #include "mime.hpp"
 #include "notes.hpp"
+#include "clipboard.hpp"
 #include "text.hpp"
+#include "theme.hpp"
 
 namespace jotmail {
 
@@ -28,15 +33,7 @@ namespace {
 
 using namespace ftxui;
 
-const Color BG = Color::RGB(0x23, 0x2e, 0x1b);
-const Color PANEL = Color::RGB(0x1c, 0x24, 0x15);
-const Color FG = Color::RGB(0xeb, 0xdb, 0xb2);
-const Color DIM = Color::RGB(0x7c, 0x6f, 0x64);
-const Color BAR = Color::RGB(0xa8, 0x99, 0x84);
-const Color GREEN = Color::RGB(0xb8, 0xbb, 0x26);
-const Color AQUA = Color::RGB(0x8e, 0xc0, 0x7c);
-const Color SELECT = Color::RGB(0x42, 0x54, 0x33);
-const Color FILTER = Color::RGB(0x2d, 0x3a, 0x22);
+Theme T;  // set by run_tui
 
 constexpr int LIST_WIDTH = 38;
 
@@ -120,7 +117,7 @@ Element styled(const std::string& line, Color base, int width) {
                 if (span.italic)
                     e = e | italic;
                 if (span.link)
-                    e = e | underlined | color(AQUA);
+                    e = e | underlined | color(T.link);
                 row.push_back(e);
                 used += w;
             }
@@ -136,8 +133,9 @@ Element styled(const std::string& line, Color base, int width) {
 
 class Browser {
 public:
-    Browser(const Account& account, kitty::Support images)
-        : store_(account), notes_(store_), images_(images), screen_(ScreenInteractive::Fullscreen()) {}
+    Browser(const Account& account, kitty::Support images, std::string paste_command)
+        : store_(account), notes_(store_), images_(images), screen_(ScreenInteractive::Fullscreen()),
+          paste_command_(std::move(paste_command)) {}
 
     int run() {
         if (images_.enabled())
@@ -153,6 +151,7 @@ private:
     Store store_;
     Notes notes_;
     kitty::Images images_;
+    std::string paste_command_;
     ScreenInteractive screen_;
 
     std::vector<Note> all_;
@@ -208,12 +207,12 @@ private:
         apply_filter(keep_uuid);
     }
 
-    std::optional<std::string> edit(const std::string& text) {
+    std::optional<std::string> edit(const std::string& text, const std::optional<std::string>& original = std::nullopt) {
         std::optional<std::string> out;
         std::string error;
         screen_.WithRestoredIO([&] {
             try {
-                out = edit_text(text);
+                out = edit_text(text, original);
             } catch (const std::exception& e) {
                 error = e.what();
             }
@@ -243,6 +242,48 @@ private:
                 if (all_[shown_[k]].title == title_of(text))
                     selected_ = static_cast<int>(k);
         status_ = "saved";
+    }
+
+    // The clipboard's image, saved to a file and added at the end of the note (a new note when
+    // there is none); the editor opens so the [attachment:...] line can be moved or removed.
+    void paste(const Note* n) {
+        ClipboardImage img;
+        try {
+            img = clipboard_image(paste_command_);
+        } catch (const std::exception& ex) {
+            status_ = ex.what();
+            return;
+        }
+        // A private directory, so the image can have a plain name ("Pasted image.png" on the phone).
+        const char* run = std::getenv("XDG_RUNTIME_DIR");
+        std::string dir = std::string(run && *run ? run : "/tmp") + "/jotmail-XXXXXX";
+        if (!mkdtemp(dir.data())) {
+            status_ = "could not save the pasted image";
+            return;
+        }
+        std::string path = dir + "/Pasted image." + (img.type == "image/jpeg" ? "jpg" : img.type.substr(6));
+        {
+            std::ofstream f(path, std::ios::binary);
+            f << img.bytes;
+            if (!f) {
+                status_ = "could not save the pasted image";
+                return;
+            }
+        }
+        std::string line = "[attachment:" + path + "]\n";
+        bool attempted = false;
+        if (n) {
+            Note copy = *n;
+            std::string base = copy.md.empty() || copy.md.ends_with("\n") ? copy.md : copy.md + "\n";
+            if (auto text = edit(base + line, copy.md))
+                attempted = true, save(&copy, *text);
+        } else if (auto text = edit("# \n" + line); text && text->find_first_not_of("# \n") != std::string::npos) {
+            attempted = true, save(nullptr, *text);
+        }
+        if (!attempted || status_ == "saved") {  // kept after a failed save, for the unsaved text that names it
+            ::unlink(path.c_str());
+            ::rmdir(dir.c_str());
+        }
     }
 
     bool on_event(const Event& e) {
@@ -285,6 +326,8 @@ private:
                 if (auto text = edit(copy.md))
                     save(&copy, *text);
             }
+        } else if (e == Event::Character('p')) {
+            paste(n);
         } else if (e == Event::Character('n')) {
             if (auto text = edit("# \n"); text && text->find_first_not_of("# \n") != std::string::npos)
                 save(nullptr, *text);
@@ -325,37 +368,37 @@ private:
     // --- drawing ------------------------------------------------------------------
 
     Element render() {
-        Element bar = text(" Notes · " + store_.account().user + " · " + status_) | color(BAR) | bgcolor(PANEL);
-        Element search = filtering_    ? hbox(text(" /" + filter_) | color(FG), text("▏") | color(GREEN))
-                         : filter_.empty() ? text(" / search notes") | color(DIM)
-                                           : text(" /" + filter_) | color(FG);
-        search = search | bgcolor(filtering_ ? SELECT : FILTER);
+        Element bar = text(" Notes · " + store_.account().user + " · " + status_) | color(T.status) | bgcolor(T.panel);
+        Element search = filtering_    ? hbox(text(" /" + filter_) | color(T.text), text("▏") | color(T.accent))
+                         : filter_.empty() ? text(" / search notes") | color(T.muted)
+                                           : text(" /" + filter_) | color(T.text);
+        search = search | bgcolor(filtering_ ? T.highlight : T.search);
 
         Elements items;
         for (size_t k = 0; k < shown_.size(); ++k) {
             const Note& n = all_[shown_[k]];
             bool sel = static_cast<int>(k) == selected_;
             Element item = vbox({
-                text(" " + fit(n.title + (n.attachments ? " 📎" : ""), LIST_WIDTH - 2)) | bold | color(sel ? PANEL : FG),
-                text(" " + when(n.date)) | color(sel ? FILTER : DIM),
+                text(" " + fit(n.title + (n.attachments ? " 📎" : ""), LIST_WIDTH - 2)) | bold | color(sel ? T.selected_text : T.text),
+                text(" " + when(n.date)) | color(sel ? T.selected_text : T.muted),
             });
-            item = item | bgcolor(sel ? GREEN : PANEL);
+            item = item | bgcolor(sel ? T.accent : T.panel);
             if (sel)
                 item = item | focus;
             items.push_back(item);
         }
         if (items.empty())
             items.push_back(text(""));
-        Element list = vbox(std::move(items)) | yframe | vscroll_indicator | size(WIDTH, EQUAL, LIST_WIDTH) | bgcolor(PANEL);
+        Element list = vbox(std::move(items)) | yframe | vscroll_indicator | size(WIDTH, EQUAL, LIST_WIDTH) | bgcolor(T.panel);
 
-        Element footer = text(" e edit · n new · d delete · / search · r refresh · J/K scroll · q quit") | color(DIM) | bgcolor(PANEL);
-        return vbox({bar, search, hbox({list, separator() | color(SELECT), preview() | flex}) | flex, footer}) | bgcolor(BG);
+        Element footer = text(" e edit · n new · p paste image · d delete · / search · r refresh · J/K scroll · q quit") | color(T.muted) | bgcolor(T.panel);
+        return vbox({bar, search, hbox({list, separator() | color(T.highlight), preview() | flex}) | flex, footer}) | bgcolor(T.background);
     }
 
     Element preview() {
         const Note* n = current();
         if (!n)
-            return paragraph(" No notes. Press n to write one.") | color(DIM);
+            return paragraph(" No notes. Press n to write one.") | color(T.muted);
 
         auto dim = Terminal::Size();
         int width = std::max(10, dim.dimx - LIST_WIDTH - 5);
@@ -376,7 +419,7 @@ private:
                     for (int r = 0; r < img->rows; ++r)
                         rows.push_back(text(kitty::placeholder_row(r, img->cols)) | color(id));
                 } else {
-                    rows.push_back(text("📎 image") | italic | color(DIM));
+                    rows.push_back(text("📎 image") | italic | color(T.muted));
                 }
                 continue;
             }
@@ -384,12 +427,12 @@ private:
             while (h < line.size() && h < 3 && line[h] == '#')
                 ++h;
             if (h > 0 && h < line.size() && line[h] == ' ') {
-                rows.push_back(styled(line.substr(h + 1), h == 1 ? GREEN : AQUA, width) | bold);
+                rows.push_back(styled(line.substr(h + 1), h == 1 ? T.accent : T.link, width) | bold);
                 continue;
             }
             size_t indent = line.find_first_not_of(' ');
             if (indent != std::string::npos && (line.compare(indent, 2, "- ") == 0 || line.compare(indent, 2, "* ") == 0)) {
-                rows.push_back(hbox({text("  • ") | color(GREEN), styled(line.substr(indent + 2), FG, width - 4) | flex}));
+                rows.push_back(hbox({text("  • ") | color(T.accent), styled(line.substr(indent + 2), T.text, width - 4) | flex}));
                 continue;
             }
             if (indent != std::string::npos) {
@@ -397,17 +440,17 @@ private:
                 while (d < line.size() && std::isdigit(static_cast<unsigned char>(line[d])))
                     ++d;
                 if (d > indent && d + 1 < line.size() && (line[d] == '.' || line[d] == ')') && line[d + 1] == ' ') {
-                    rows.push_back(hbox({text("  " + line.substr(indent, d - indent + 1) + " ") | color(GREEN),
-                                         styled(line.substr(d + 2), FG, width - 6) | flex}));
+                    rows.push_back(hbox({text("  " + line.substr(indent, d - indent + 1) + " ") | color(T.accent),
+                                         styled(line.substr(d + 2), T.text, width - 6) | flex}));
                     continue;
                 }
             }
-            rows.push_back(styled(line, FG, width));
+            rows.push_back(styled(line, T.text, width));
         }
         scroll_ = std::min(scroll_, std::max(0, static_cast<int>(rows.size()) - 1));
         Elements visible(rows.begin() + scroll_, rows.end());
         // yframe: a note taller than the pane is clipped at the bottom instead of having its lines squeezed
-        return hbox({text("  "), vbox(std::move(visible)) | yframe | flex, text(" ")}) | bgcolor(BG);
+        return hbox({text("  "), vbox(std::move(visible)) | yframe | flex, text(" ")}) | bgcolor(T.background);
     }
 
     std::optional<kitty::Placed> image(const Note& n, const std::string& cid, int max_cols, int max_rows) {
@@ -425,8 +468,9 @@ private:
 
 }  // namespace
 
-int run_tui(const Account& account, const std::string& images) {
-    Browser browser(account, kitty::detect(images));
+int run_tui(const Account& account, const Config& config) {
+    T = make_theme(config.theme_preset, config.theme_colors);
+    Browser browser(account, kitty::detect(config.images), config.paste_command);
     return browser.run();
 }
 

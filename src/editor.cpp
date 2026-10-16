@@ -30,7 +30,7 @@ std::string read_file(const std::filesystem::path& p) {
 
 }  // namespace
 
-std::optional<std::string> edit_text(const std::string& text) {
+std::optional<std::string> edit_text(const std::string& text, const std::optional<std::string>& original) {
     const char* dir = std::getenv("XDG_RUNTIME_DIR");
     std::string tmpl = std::string(dir && *dir ? dir : "/tmp") + "/note-XXXXXX.md";
     int fd = mkstemps(tmpl.data(), 3);
@@ -54,7 +54,7 @@ std::optional<std::string> edit_text(const std::string& text) {
     unlink(tmpl.c_str());
     if (status == -1 || !WIFEXITED(status))
         throw std::runtime_error(std::string("could not run ") + editor);
-    if (edited == text)
+    if (edited == original.value_or(text))
         return std::nullopt;
     return edited;
 }

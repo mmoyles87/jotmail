@@ -59,13 +59,13 @@ FetchContent_MakeAvailable(ftxui tomlplusplus vmime stb)
 # --- jotmail ------------------------------------------------------------------
 
 add_library(jotmail_core STATIC
-  src/config.cpp src/convert.cpp src/editor.cpp src/html.cpp src/kitty.cpp src/mime.cpp src/notes.cpp
-  src/store.cpp src/text.cpp)
+  src/clipboard.cpp src/config.cpp src/convert.cpp src/editor.cpp src/html.cpp src/kitty.cpp src/mime.cpp
+  src/notes.cpp src/store.cpp src/text.cpp src/theme.cpp)
 target_include_directories(jotmail_core PUBLIC src)
 target_compile_definitions(jotmail_core PUBLIC VMIME_STATIC)  # vmime-static does not export it
 target_link_libraries(jotmail_core PUBLIC
   tomlplusplus::tomlplusplus
-  vmime-static OpenSSL::SSL OpenSSL::Crypto Iconv::Iconv ZLIB::ZLIB)
+  vmime-static OpenSSL::SSL OpenSSL::Crypto Iconv::Iconv ZLIB::ZLIB ftxui::screen)
 target_include_directories(jotmail_core SYSTEM PRIVATE ${stb_SOURCE_DIR})
 if(WEBP_FOUND)
   target_compile_definitions(jotmail_core PRIVATE JOTMAIL_HAVE_WEBP)

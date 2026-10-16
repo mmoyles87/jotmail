@@ -34,6 +34,18 @@ Config Config::load(const std::filesystem::path& path) {
     c.images = t["images"].value_or(std::string("auto"));
     if (c.images != "auto" && c.images != "kitty" && c.images != "off")
         throw std::runtime_error(path.string() + ": images must be \"auto\", \"kitty\" or \"off\"");
+    c.paste_command = t["paste_command"].value_or(std::string{});
+    if (auto* theme = t["theme"].as_table()) {
+        for (auto& [key, node] : *theme) {
+            auto v = node.value<std::string>();
+            if (!v)
+                throw std::runtime_error(path.string() + ": theme." + std::string(key.str()) + " must be a string");
+            if (key.str() == "preset")
+                c.theme_preset = *v;
+            else
+                c.theme_colors[std::string(key.str())] = *v;
+        }
+    }
     auto* accounts = t["accounts"].as_table();
     if (!accounts || accounts->empty())
         throw std::runtime_error(path.string() + ": no [accounts.<name>] sections");
