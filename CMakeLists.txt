@@ -1,0 +1,56 @@
+cmake_minimum_required(VERSION 3.24)
+project(jotmail VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+include(FetchContent)
+find_package(OpenSSL REQUIRED)
+find_package(Iconv REQUIRED)
+
+# --- dependencies -------------------------------------------------------------
+
+FetchContent_Declare(ftxui
+  GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI
+  GIT_TAG v7.0.3
+  GIT_SHALLOW TRUE)
+
+FetchContent_Declare(tomlplusplus
+  GIT_REPOSITORY https://github.com/marzer/tomlplusplus
+  GIT_TAG v3.4.0
+  GIT_SHALLOW TRUE)
+
+# vmime has no recent release; pin a commit.
+FetchContent_Declare(vmime
+  GIT_REPOSITORY https://github.com/kisli/vmime
+  GIT_TAG 63ddb3b378487e7209ec3390cb33c6cde9bdec0a)
+
+set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(FTXUI_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+
+set(VMIME_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+set(VMIME_BUILD_STATIC_LIBRARY ON CACHE BOOL "" FORCE)
+set(VMIME_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set(VMIME_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(VMIME_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
+set(VMIME_HAVE_SASL_SUPPORT OFF CACHE BOOL "" FORCE)
+set(VMIME_CHARSETCONV_LIB "iconv" CACHE STRING "" FORCE)
+set(VMIME_HAVE_TLS_SUPPORT ON CACHE BOOL "" FORCE)
+set(VMIME_TLS_SUPPORT_LIB "openssl" CACHE STRING "" FORCE)
+set(VMIME_HAVE_MESSAGING_PROTO_POP3 OFF CACHE BOOL "" FORCE)
+set(VMIME_HAVE_MESSAGING_PROTO_SMTP OFF CACHE BOOL "" FORCE)
+set(VMIME_HAVE_MESSAGING_PROTO_MAILDIR OFF CACHE BOOL "" FORCE)
+set(VMIME_HAVE_MESSAGING_PROTO_SENDMAIL OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(ftxui tomlplusplus vmime)
+
+# --- jotmail ------------------------------------------------------------------
+
+add_executable(jotmail src/main.cpp src/config.cpp src/store.cpp)
+target_link_libraries(jotmail PRIVATE
+  ftxui::component ftxui::dom ftxui::screen
+  tomlplusplus::tomlplusplus
+  vmime-static OpenSSL::SSL OpenSSL::Crypto Iconv::Iconv)
+target_compile_definitions(jotmail PRIVATE VMIME_STATIC)  # vmime-static does not export it
