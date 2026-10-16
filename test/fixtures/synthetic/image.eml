@@ -1,0 +1,33 @@
+From: someone@example.com
+X-Uniform-Type-Identifier: com.apple.mail-note
+Content-Type: multipart/related;
+	type="text/html";
+	boundary="Apple-Mail=_AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
+Mime-Version: 1.0 (Mac OS X Notes 4.13 \(3195\))
+Date: Thu, 24 Oct 2024 13:18:28 -0400
+X-Mail-Created-Date: Sat, 5 Dec 2020 15:19:22 -0500
+Subject: Photo
+X-Universally-Unique-Identifier: 44444444-4444-4444-8444-444444444444
+Message-Id: <44444444-4444-4444-8444-444444444444@example.com>
+
+--Apple-Mail=_AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html;
+	charset=utf-8
+
+<html><head></head><body><div><h1>Photo</h1></div><div>Before</div><div><ob=
+ject type=3D"application/x-apple-msg-attachment" data=3D"cid:0BDCA9D6-A671-=
+43C3-AABC-733FDC4BADE8"><br></object><br></div><div>After</div></body></htm=
+l>
+--Apple-Mail=_AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE
+Content-Transfer-Encoding: base64
+Content-Disposition: inline;
+	filename=pixel.png
+Content-Type: image/png;
+	name="pixel.png"
+Content-Id: <0BDCA9D6-A671-43C3-AABC-733FDC4BADE8>
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM
+IQAAAABJRU5ErkJggg==
+
+--Apple-Mail=_AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE--

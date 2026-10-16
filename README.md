@@ -19,6 +19,8 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
+Run the tests with `ctest --test-dir build`.
+
 ## Configure
 
 `~/.config/jotmail/config.toml`:

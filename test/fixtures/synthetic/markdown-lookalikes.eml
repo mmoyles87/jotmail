@@ -1,0 +1,13 @@
+From: someone@example.com
+X-Uniform-Type-Identifier: com.apple.mail-note
+Content-Type: text/html;
+	charset=us-ascii
+Content-Transfer-Encoding: 7bit
+Mime-Version: 1.0 (Mac OS X Notes 4.13 \(3195\))
+Date: Thu, 24 Oct 2024 13:18:28 -0400
+X-Mail-Created-Date: Sat, 5 Dec 2020 15:19:22 -0500
+Subject: Lookalikes
+X-Universally-Unique-Identifier: 55555555-5555-4555-8555-555555555555
+Message-Id: <55555555-5555-4555-8555-555555555555@example.com>
+
+<html><head></head><body><div>2*3*4 = 24</div><div>snake_case and *stars* and **double**</div><div># not a heading</div><div>- not a list</div><div>1. not numbered</div><div>(see https://example.com/path) and [x](https://example.com)</div><div>a * b * c</div><div>[attachment:fake]</div><div>stray < bracket &amp; stray &unknown; entity &amp</div></body></html>

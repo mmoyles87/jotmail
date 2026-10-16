@@ -1,0 +1,13 @@
+From: someone@example.com
+X-Uniform-Type-Identifier: com.apple.mail-note
+Content-Type: text/html;
+	charset=us-ascii
+Content-Transfer-Encoding: 7bit
+Mime-Version: 1.0 (Mac OS X Notes 4.13 \(3195\))
+Date: Thu, 24 Oct 2024 13:18:28 -0400
+X-Mail-Created-Date: Sat, 5 Dec 2020 15:19:22 -0500
+Subject: Formatting
+X-Universally-Unique-Identifier: 33333333-3333-4333-8333-333333333333
+Message-Id: <33333333-3333-4333-8333-333333333333@example.com>
+
+<html><head></head><body><div><h1>Formatting</h1></div><div><u>under</u> <strike>struck</strike> <tt>mono</tt> <span style="color: red">red</span></div><blockquote>quoted block</blockquote><!-- a comment --><div>it&#8217;s &hellip; done</div><p>paragraph</p>text after p<div><h4>h4 title</h4></div></body></html>

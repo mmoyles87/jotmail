@@ -1,0 +1,22 @@
+From: someone@example.com
+X-Uniform-Type-Identifier: com.apple.mail-note
+Content-Type: text/html;
+	charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+Mime-Version: 1.0 (Mac OS X Notes 4.13 \(3195\))
+Date: Thu, 24 Oct 2024 13:18:28 -0400
+X-Mail-Created-Date: Sat, 5 Dec 2020 15:19:22 -0500
+Subject: =?utf-8?Q?Caf=C3=A9_notes?=
+X-Universally-Unique-Identifier: 22222222-2222-4222-8222-222222222222
+Message-Id: <22222222-2222-4222-8222-222222222222@example.com>
+
+<html><head></head><body><div><h1>Caf=C3=A9 notes =F0=9F=98=80</h1></div><d=
+iv>Plain <b>bold</b> and <i>italic</i> and <b><i>both</i></b>.</div><div>Li=
+nk <a href=3D"https://example.com/a?b=3D1&amp;c=3D2">with text</a> and <a h=
+ref=3D"https://example.com">https://example.com</a> and a bare https://exam=
+ple.org/x.</div><div>Entities: 1 &lt; 2 &amp;&amp; 3 &gt; 2, caf&eacute;, &=
+#8220;quoted&#8221;, &#x2014; dash</div><div>Non=C2=A0breaking=C2=A0spaces =
+and trailing nbsp=C2=A0=C2=A0</div><div>A long line that iOS would wrap wit=
+h soft line breaks. A long line that iOS would wrap with soft line breaks. =
+A long line that iOS would wrap with soft line breaks. A long line that iOS=
+ would wrap with soft line breaks. </div></body></html>

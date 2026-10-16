@@ -48,9 +48,34 @@ FetchContent_MakeAvailable(ftxui tomlplusplus vmime)
 
 # --- jotmail ------------------------------------------------------------------
 
-add_executable(jotmail src/main.cpp src/config.cpp src/store.cpp)
-target_link_libraries(jotmail PRIVATE
-  ftxui::component ftxui::dom ftxui::screen
+add_library(jotmail_core STATIC
+  src/config.cpp src/convert.cpp src/html.cpp src/mime.cpp src/store.cpp src/text.cpp)
+target_include_directories(jotmail_core PUBLIC src)
+target_compile_definitions(jotmail_core PUBLIC VMIME_STATIC)  # vmime-static does not export it
+target_link_libraries(jotmail_core PUBLIC
   tomlplusplus::tomlplusplus
   vmime-static OpenSSL::SSL OpenSSL::Crypto Iconv::Iconv)
-target_compile_definitions(jotmail PRIVATE VMIME_STATIC)  # vmime-static does not export it
+
+add_executable(jotmail src/main.cpp)
+target_link_libraries(jotmail PRIVATE jotmail_core ftxui::component ftxui::dom ftxui::screen)
+
+# --- tests --------------------------------------------------------------------
+
+option(JOTMAIL_TESTS "Build the tests" ${PROJECT_IS_TOP_LEVEL})
+if(JOTMAIL_TESTS)
+  enable_testing()
+  find_package(GTest QUIET)
+  if(NOT GTest_FOUND)
+    FetchContent_Declare(googletest
+      GIT_REPOSITORY https://github.com/google/googletest
+      GIT_TAG v1.17.0
+      GIT_SHALLOW TRUE)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+  endif()
+  add_executable(jotmail_tests test/conversion_test.cpp)
+  target_compile_definitions(jotmail_tests PRIVATE JOTMAIL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures")
+  target_link_libraries(jotmail_tests PRIVATE jotmail_core GTest::gtest_main)
+  include(GoogleTest)
+  gtest_discover_tests(jotmail_tests)
+endif()
