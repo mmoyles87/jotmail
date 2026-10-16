@@ -22,6 +22,17 @@ namespace jotmail {
 
 namespace {
 
+// Every certificate in a PEM file.
+std::vector<std::shared_ptr<vmime::security::cert::X509Certificate>> read_certs(const std::string& path) {
+    std::vector<std::shared_ptr<vmime::security::cert::X509Certificate>> certs;
+    std::ifstream f(path, std::ios::binary);
+    if (!f)
+        return certs;
+    std::string pem((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    vmime::security::cert::X509Certificate::import(reinterpret_cast<const vmime::byte_t*>(pem.data()), pem.size(), certs);
+    return certs;
+}
+
 // The system's trusted roots. vmime verifies against an explicit list, not the OS store.
 std::vector<std::shared_ptr<vmime::security::cert::X509Certificate>> system_roots() {
     static const char* bundles[] = {
@@ -108,8 +119,15 @@ void Store::connect() {
     impl_->store->setProperty("auth.username", account_.user);
     impl_->store->setProperty("auth.password", run_password_command(account_.password_command));
 
+    auto roots = system_roots();
+    if (!account_.ca_file.empty()) {
+        auto extra = read_certs(account_.ca_file);
+        if (extra.empty())
+            throw std::runtime_error("no certificates in ca_file " + account_.ca_file);
+        roots.insert(roots.end(), extra.begin(), extra.end());
+    }
     auto verifier = std::make_shared<vmime::security::cert::defaultCertificateVerifier>();
-    verifier->setX509RootCAs(system_roots());
+    verifier->setX509RootCAs(roots);
     impl_->store->setCertificateVerifier(verifier);
 
     impl_->store->connect();

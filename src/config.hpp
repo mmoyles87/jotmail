@@ -14,6 +14,7 @@ struct Account {
     std::string user;
     std::string password_command;  // run with /bin/sh; the first line of its output is the password
     std::string folder = "Notes";
+    std::string ca_file;  // extra trusted CA certificates (PEM), for a server with a private CA
 };
 
 struct Config {

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# A local IMAP server with sample notes, for trying jotmail without an iPhone.
+#
+#   tools/demo/demo up     start the server (Docker), seed it, write a jotmail config
+#   tools/demo/demo down   stop and remove the server and its files
+#
+# After `up`, run jotmail against it with the XDG_CONFIG_HOME it prints.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+state=${JOTMAIL_DEMO_DIR:-${XDG_RUNTIME_DIR:-/tmp}/jotmail-demo}
+name=jotmail-demo
+port=${JOTMAIL_DEMO_PORT:-10993}
+image=dovecot/dovecot:2.3.21
+
+case ${1:-} in
+  up)
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    mkdir -p "$state/certs" "$state/config/jotmail"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj /CN=localhost \
+      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+      -keyout "$state/certs/key.pem" -out "$state/certs/cert.pem" 2>/dev/null
+    chmod 644 "$state/certs/key.pem"  # read by the container's dovecot user
+    docker run -d --name "$name" -p "127.0.0.1:$port:993" \
+      -v "$here/dovecot.conf:/etc/dovecot/dovecot.conf:ro" \
+      -v "$state/certs:/etc/dovecot/demo:ro" "$image" >/dev/null
+    for _ in $(seq 50); do
+      python3 -c "import socket; socket.create_connection(('127.0.0.1', $port), 1)" 2>/dev/null && break
+      sleep 0.2
+    done
+    sleep 1
+    python3 "$here/seed.py" localhost "$port" "$state/certs/cert.pem"
+    cat > "$state/config/jotmail/config.toml" <<EOF
+default = "demo"
+
+[accounts.demo]
+host = "localhost"
+port = $port
+user = "demo@example.com"
+password_command = "echo demo"
+ca_file = "$state/certs/cert.pem"
+EOF
+    echo "ready: XDG_CONFIG_HOME=$state/config jotmail"
+    ;;
+  down)
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    rm -rf "$state"
+    echo "removed"
+    ;;
+  *)
+    sed -n '2,8s/^# \{0,1\}//p' "$0"
+    exit 2
+    ;;
+esac

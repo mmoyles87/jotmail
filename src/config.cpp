@@ -67,6 +67,10 @@ Config Config::load(const std::filesystem::path& path) {
         acc.password_command = need("password_command");
         acc.port = (*a)["port"].value_or(993);
         acc.folder = (*a)["folder"].value_or(std::string("Notes"));
+        acc.ca_file = (*a)["ca_file"].value_or(std::string{});
+        if (acc.ca_file.starts_with("~/"))
+            if (const char* home = std::getenv("HOME"))
+                acc.ca_file = home + acc.ca_file.substr(1);
         c.accounts.emplace(acc.name, std::move(acc));
     }
     if (c.default_account.empty())

@@ -7,6 +7,8 @@ each note is stored as an HTML email in the account's `Notes` folder. jotmail re
 that folder directly: no sync service, no server component, and edits show up on the phone as
 edits, not duplicates.
 
+![jotmail showing a note with an image](docs/screenshot.png)
+
 - Browse, search, edit and delete notes in a two-pane terminal UI; notes open in `$EDITOR` as Markdown.
 - Images in notes are shown inline in kitty and Ghostty, including inside tmux. Add one by
   pasting it from the clipboard, or by writing its path in the note.
@@ -40,10 +42,22 @@ port = 993                                           # optional, implicit TLS
 user = "me@example.com"
 password_command = "pass show mail/me@example.com"   # first line of output is the password
 folder = "Notes"                                     # optional
+# ca_file = "~/certs/my-ca.pem"                      # optional: also trust this CA (self-hosted servers)
 ```
 
 `password_command` runs through `/bin/sh`, so `pass`, `secret-tool`,
 `security find-internet-password -w` or `op read` all work.
+
+## Try it without an iPhone
+
+`tools/demo/demo up` starts a throwaway IMAP server in Docker, fills its `Notes` folder with
+sample notes and writes a config for it (it needs Docker, OpenSSL and Python 3):
+
+```sh
+tools/demo/demo up
+XDG_CONFIG_HOME=$XDG_RUNTIME_DIR/jotmail-demo/config jotmail
+tools/demo/demo down
+```
 
 ## Use
 
