@@ -18,6 +18,7 @@ struct Account {
 
 struct Config {
     std::string default_account;
+    std::string images = "auto";  // "auto", "kitty" or "off"
     std::map<std::string, Account> accounts;
 
     // $XDG_CONFIG_HOME/jotmail/config.toml, or ~/.config/jotmail/config.toml

@@ -1,0 +1,433 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "tui.hpp"
+
+#include <algorithm>
+#include <ctime>
+#include <map>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include <ftxui/component/component.hpp>
+#include <ftxui/component/event.hpp>
+#include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/dom/elements.hpp>
+#include <ftxui/screen/string.hpp>
+#include <ftxui/screen/terminal.hpp>
+
+#include "convert.hpp"
+#include "editor.hpp"
+#include "kitty.hpp"
+#include "mime.hpp"
+#include "notes.hpp"
+#include "text.hpp"
+
+namespace jotmail {
+
+namespace {
+
+using namespace ftxui;
+
+const Color BG = Color::RGB(0x23, 0x2e, 0x1b);
+const Color PANEL = Color::RGB(0x1c, 0x24, 0x15);
+const Color FG = Color::RGB(0xeb, 0xdb, 0xb2);
+const Color DIM = Color::RGB(0x7c, 0x6f, 0x64);
+const Color BAR = Color::RGB(0xa8, 0x99, 0x84);
+const Color GREEN = Color::RGB(0xb8, 0xbb, 0x26);
+const Color AQUA = Color::RGB(0x8e, 0xc0, 0x7c);
+const Color SELECT = Color::RGB(0x42, 0x54, 0x33);
+const Color FILTER = Color::RGB(0x2d, 0x3a, 0x22);
+
+constexpr int LIST_WIDTH = 38;
+
+std::string when(std::time_t t) {
+    std::time_t now = std::time(nullptr);
+    std::tm d{}, n{};
+    localtime_r(&t, &d);
+    localtime_r(&now, &n);
+    char buf[32];
+    const char* fmt = (d.tm_year == n.tm_year && d.tm_yday == n.tm_yday) ? "%H:%M"
+                      : (now - t < 7 * 86400 && now >= t)                  ? "%a %H:%M"
+                      : d.tm_year != n.tm_year                             ? "%b %d %Y"
+                                                                           : "%b %d";
+    std::strftime(buf, sizeof buf, fmt, &d);
+    return buf;
+}
+
+std::string lower(std::string s) {
+    for (auto& c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+void pop_utf8(std::string& s) {
+    while (!s.empty() && (static_cast<unsigned char>(s.back()) & 0xC0) == 0x80)
+        s.pop_back();
+    if (!s.empty())
+        s.pop_back();
+}
+
+// At most `cols` display columns of s, with an ellipsis if it was cut.
+std::string fit(const std::string& s, int cols) {
+    if (string_width(s) <= cols)
+        return s;
+    std::string out;
+    for (auto& g : Utf8ToGlyphs(s)) {
+        if (string_width(out + g) > cols - 1)
+            break;
+        out += g;
+    }
+    return out + "…";
+}
+
+// s cut into pieces at most `cols` columns wide
+std::vector<std::string> chop(const std::string& s, int cols) {
+    std::vector<std::string> out(1);
+    for (auto& g : Utf8ToGlyphs(s)) {
+        if (string_width(out.back() + g) > cols)
+            out.emplace_back();
+        out.back() += g;
+    }
+    return out;
+}
+
+// A line with its inline formatting, word-wrapped to `width` columns. The wrapping is done here
+// rather than with hflow, whose height inside a vbox is not reliable.
+Element styled(const std::string& line, Color base, int width) {
+    width = std::max(width, 1);
+    Elements rows, row;
+    int used = 0;
+    for (auto& span : inline_spans(line)) {
+        size_t a = 0;
+        while (a < span.text.size()) {
+            size_t b = span.text.find(' ', a);
+            b = b == std::string::npos ? span.text.size() : b + 1;
+            for (auto& piece : chop(span.text.substr(a, b - a), width)) {
+                std::string word = piece;
+                int w = string_width(word);
+                std::string bare = word;
+                while (!bare.empty() && bare.back() == ' ')
+                    bare.pop_back();
+                if (used > 0 && used + string_width(bare) > width) {  // a trailing space may hang over the edge
+                    rows.push_back(hbox(std::move(row)));
+                    row.clear(), used = 0;
+                    if (word.find_first_not_of(' ') == std::string::npos)
+                        continue;
+                }
+                Element e = text(word) | color(base);
+                if (span.bold)
+                    e = e | bold;
+                if (span.italic)
+                    e = e | italic;
+                if (span.link)
+                    e = e | underlined | color(AQUA);
+                row.push_back(e);
+                used += w;
+            }
+            a = b;
+        }
+    }
+    if (!row.empty())
+        rows.push_back(hbox(std::move(row)));
+    if (rows.empty())
+        rows.push_back(text(""));  // a blank line keeps its height
+    return vbox(std::move(rows));
+}
+
+class Browser {
+public:
+    Browser(const Account& account, kitty::Support images)
+        : store_(account), notes_(store_), images_(images), screen_(ScreenInteractive::Fullscreen()) {}
+
+    int run() {
+        if (images_.enabled())
+            Terminal::SetColorSupport(Terminal::Color::TrueColor);
+        status_ = "loading…";
+        auto ui = CatchEvent(Renderer([this] { return render(); }), [this](Event e) { return on_event(e); });
+        screen_.Post([this] { refresh(); });
+        screen_.Loop(ui);
+        return 0;
+    }
+
+private:
+    Store store_;
+    Notes notes_;
+    kitty::Images images_;
+    ScreenInteractive screen_;
+
+    std::vector<Note> all_;
+    std::vector<size_t> shown_;  // indices into all_
+    int selected_ = 0;
+    std::string filter_;
+    bool filtering_ = false;
+    std::string status_;
+    std::optional<unsigned long> pending_delete_;
+    int scroll_ = 0;  // preview lines scrolled past
+    std::map<std::string, std::optional<Attachment>> attachments_;
+
+    const Note* current() const {
+        return shown_.empty() ? nullptr : &all_[shown_[std::clamp(selected_, 0, static_cast<int>(shown_.size()) - 1)]];
+    }
+
+    void select(int i) {
+        int was = selected_;
+        selected_ = shown_.empty() ? 0 : std::clamp(i, 0, static_cast<int>(shown_.size()) - 1);
+        if (selected_ != was) {
+            scroll_ = 0;
+            pending_delete_.reset();
+        }
+    }
+
+    void count_status() {
+        status_ = filter_.empty() ? std::to_string(all_.size()) + " notes"
+                                  : std::to_string(shown_.size()) + " of " + std::to_string(all_.size()) + " notes";
+    }
+
+    void apply_filter(const std::string& keep_uuid = "") {
+        std::string q = lower(filter_);
+        shown_.clear();
+        for (size_t i = 0; i < all_.size(); ++i)
+            if (q.empty() || lower(all_[i].title).find(q) != std::string::npos || lower(all_[i].md).find(q) != std::string::npos)
+                shown_.push_back(i);
+        int idx = 0;
+        for (size_t k = 0; k < shown_.size(); ++k)
+            if (all_[shown_[k]].uuid == keep_uuid)
+                idx = static_cast<int>(k);
+        selected_ = idx, scroll_ = 0;
+        count_status();
+    }
+
+    void refresh(const std::string& keep_uuid = "") {
+        try {
+            all_ = notes_.load();
+        } catch (const std::exception& e) {
+            status_ = std::string("load failed: ") + e.what();
+            return;
+        }
+        attachments_.clear();
+        apply_filter(keep_uuid);
+    }
+
+    std::optional<std::string> edit(const std::string& text) {
+        std::optional<std::string> out;
+        std::string error;
+        screen_.WithRestoredIO([&] {
+            try {
+                out = edit_text(text);
+            } catch (const std::exception& e) {
+                error = e.what();
+            }
+        })();
+        if (!error.empty())
+            status_ = error;
+        return out;
+    }
+
+    void save(const Note* note, const std::string& text) {
+        std::string uuid = note ? note->uuid : "";
+        try {
+            notes_.save(note, text);
+        } catch (const Conflict&) {
+            auto kept = keep_unsaved(text);
+            refresh(uuid);
+            status_ = "changed on the server while you edited: not saved; your text is in " + kept.string();
+            return;
+        } catch (const std::exception& e) {
+            auto kept = keep_unsaved(text);
+            status_ = std::string("save failed: ") + e.what() + "; your text is in " + kept.string();
+            return;
+        }
+        refresh(uuid);
+        if (!note && !all_.empty())  // a new note: show it
+            for (size_t k = 0; k < shown_.size(); ++k)
+                if (all_[shown_[k]].title == title_of(text))
+                    selected_ = static_cast<int>(k);
+        status_ = "saved";
+    }
+
+    bool on_event(const Event& e) {
+        if (filtering_) {
+            if (e == Event::Return || e == Event::ArrowDown) {
+                filtering_ = false;
+            } else if (e == Event::Escape) {
+                filtering_ = false, filter_.clear();
+                apply_filter(current() ? current()->uuid : "");
+            } else if (e == Event::Backspace) {
+                pop_utf8(filter_);
+                apply_filter();
+            } else if (e.is_character()) {
+                filter_ += e.character();
+                apply_filter();
+            } else {
+                return false;
+            }
+            return true;
+        }
+
+        const Note* n = current();
+        if (e == Event::Character('q')) {
+            screen_.Exit();
+        } else if (e == Event::Character('j') || e == Event::ArrowDown) {
+            select(selected_ + 1);
+        } else if (e == Event::Character('k') || e == Event::ArrowUp) {
+            select(selected_ - 1);
+        } else if (e == Event::Character('g') || e == Event::Home) {
+            select(0);
+        } else if (e == Event::Character('G') || e == Event::End) {
+            select(static_cast<int>(shown_.size()) - 1);
+        } else if (e == Event::Character('J') || e == Event::PageDown || e == Event::CtrlD) {
+            scroll_ += e == Event::Character('J') ? 3 : 15;
+        } else if (e == Event::Character('K') || e == Event::PageUp || e == Event::CtrlU) {
+            scroll_ = std::max(0, scroll_ - (e == Event::Character('K') ? 3 : 15));
+        } else if (e == Event::Character('e') || e == Event::Return) {
+            if (n) {
+                Note copy = *n;
+                if (auto text = edit(copy.md))
+                    save(&copy, *text);
+            }
+        } else if (e == Event::Character('n')) {
+            if (auto text = edit("# \n"); text && text->find_first_not_of("# \n") != std::string::npos)
+                save(nullptr, *text);
+        } else if (e == Event::Character('d')) {
+            if (!n)
+                return true;
+            if (pending_delete_ != n->uid) {
+                pending_delete_ = n->uid;
+                status_ = "press d again to delete “" + n->title + "” (it goes to Trash)";
+                return true;
+            }
+            pending_delete_.reset();
+            std::string title = n->title;
+            try {
+                notes_.remove(*n);
+            } catch (const std::exception& ex) {
+                status_ = std::string("delete failed: ") + ex.what();
+                return true;
+            }
+            refresh();
+            status_ = "deleted “" + title + "”";
+        } else if (e == Event::Character('/')) {
+            filtering_ = true;
+        } else if (e == Event::Character('r')) {
+            status_ = "loading…";
+            refresh(n ? n->uuid : "");
+        } else if (e == Event::Escape) {
+            if (!filter_.empty()) {
+                filter_.clear();
+                apply_filter(n ? n->uuid : "");
+            }
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    // --- drawing ------------------------------------------------------------------
+
+    Element render() {
+        Element bar = text(" Notes · " + store_.account().user + " · " + status_) | color(BAR) | bgcolor(PANEL);
+        Element search = filtering_    ? hbox(text(" /" + filter_) | color(FG), text("▏") | color(GREEN))
+                         : filter_.empty() ? text(" / search notes") | color(DIM)
+                                           : text(" /" + filter_) | color(FG);
+        search = search | bgcolor(filtering_ ? SELECT : FILTER);
+
+        Elements items;
+        for (size_t k = 0; k < shown_.size(); ++k) {
+            const Note& n = all_[shown_[k]];
+            bool sel = static_cast<int>(k) == selected_;
+            Element item = vbox({
+                text(" " + fit(n.title + (n.attachments ? " 📎" : ""), LIST_WIDTH - 2)) | bold | color(sel ? PANEL : FG),
+                text(" " + when(n.date)) | color(sel ? FILTER : DIM),
+            });
+            item = item | bgcolor(sel ? GREEN : PANEL);
+            if (sel)
+                item = item | focus;
+            items.push_back(item);
+        }
+        if (items.empty())
+            items.push_back(text(""));
+        Element list = vbox(std::move(items)) | yframe | vscroll_indicator | size(WIDTH, EQUAL, LIST_WIDTH) | bgcolor(PANEL);
+
+        Element footer = text(" e edit · n new · d delete · / search · r refresh · J/K scroll · q quit") | color(DIM) | bgcolor(PANEL);
+        return vbox({bar, search, hbox({list, separator() | color(SELECT), preview() | flex}) | flex, footer}) | bgcolor(BG);
+    }
+
+    Element preview() {
+        const Note* n = current();
+        if (!n)
+            return paragraph(" No notes. Press n to write one.") | color(DIM);
+
+        auto dim = Terminal::Size();
+        int width = std::max(10, dim.dimx - LIST_WIDTH - 5);
+        int max_rows = std::max(4, (dim.dimy - 6) * 2 / 3);
+
+        Elements rows;
+        size_t a = 0;
+        const std::string& md = n->md;
+        while (a < md.size()) {
+            size_t e = md.find('\n', a);
+            std::string line = md.substr(a, e == std::string::npos ? std::string::npos : e - a);
+            a = e == std::string::npos ? md.size() : e + 1;
+
+            if (line.starts_with("[attachment:") && line.find(']') != std::string::npos) {
+                std::string cid = line.substr(12, line.find(']') - 12);
+                if (auto img = image(*n, cid, width, max_rows)) {
+                    Color id = Color::RGB(img->id >> 16 & 0xFF, img->id >> 8 & 0xFF, img->id & 0xFF);
+                    for (int r = 0; r < img->rows; ++r)
+                        rows.push_back(text(kitty::placeholder_row(r, img->cols)) | color(id));
+                } else {
+                    rows.push_back(text("📎 image") | italic | color(DIM));
+                }
+                continue;
+            }
+            size_t h = 0;
+            while (h < line.size() && h < 3 && line[h] == '#')
+                ++h;
+            if (h > 0 && h < line.size() && line[h] == ' ') {
+                rows.push_back(styled(line.substr(h + 1), h == 1 ? GREEN : AQUA, width) | bold);
+                continue;
+            }
+            size_t indent = line.find_first_not_of(' ');
+            if (indent != std::string::npos && (line.compare(indent, 2, "- ") == 0 || line.compare(indent, 2, "* ") == 0)) {
+                rows.push_back(hbox({text("  • ") | color(GREEN), styled(line.substr(indent + 2), FG, width - 4) | flex}));
+                continue;
+            }
+            if (indent != std::string::npos) {
+                size_t d = indent;
+                while (d < line.size() && std::isdigit(static_cast<unsigned char>(line[d])))
+                    ++d;
+                if (d > indent && d + 1 < line.size() && (line[d] == '.' || line[d] == ')') && line[d + 1] == ' ') {
+                    rows.push_back(hbox({text("  " + line.substr(indent, d - indent + 1) + " ") | color(GREEN),
+                                         styled(line.substr(d + 2), FG, width - 6) | flex}));
+                    continue;
+                }
+            }
+            rows.push_back(styled(line, FG, width));
+        }
+        scroll_ = std::min(scroll_, std::max(0, static_cast<int>(rows.size()) - 1));
+        Elements visible(rows.begin() + scroll_, rows.end());
+        // yframe: a note taller than the pane is clipped at the bottom instead of having its lines squeezed
+        return hbox({text("  "), vbox(std::move(visible)) | yframe | flex, text(" ")}) | bgcolor(BG);
+    }
+
+    std::optional<kitty::Placed> image(const Note& n, const std::string& cid, int max_cols, int max_rows) {
+        if (!images_.enabled() || n.raw.empty())
+            return std::nullopt;
+        std::string key = n.uuid + "/" + std::to_string(n.uid) + "/" + cid;
+        auto it = attachments_.find(key);
+        if (it == attachments_.end())
+            it = attachments_.emplace(key, find_attachment(n.raw, cid)).first;
+        if (!it->second)
+            return std::nullopt;
+        return images_.place(key, it->second->type, it->second->bytes, max_cols, max_rows);
+    }
+};
+
+}  // namespace
+
+int run_tui(const Account& account, const std::string& images) {
+    Browser browser(account, kitty::detect(images));
+    return browser.run();
+}
+
+}  // namespace jotmail

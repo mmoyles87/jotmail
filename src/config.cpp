@@ -31,6 +31,9 @@ Config Config::load(const std::filesystem::path& path) {
 
     Config c;
     c.default_account = t["default"].value_or(std::string{});
+    c.images = t["images"].value_or(std::string("auto"));
+    if (c.images != "auto" && c.images != "kitty" && c.images != "off")
+        throw std::runtime_error(path.string() + ": images must be \"auto\", \"kitty\" or \"off\"");
     auto* accounts = t["accounts"].as_table();
     if (!accounts || accounts->empty())
         throw std::runtime_error(path.string() + ": no [accounts.<name>] sections");

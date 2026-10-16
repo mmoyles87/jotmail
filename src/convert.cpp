@@ -171,10 +171,14 @@ bool url_start(const std::u32string& s, size_t p, size_t& after) {
     return true;
 }
 
-std::u32string inline_md(const std::u32string& text);
+// One alternative of _INLINE matched at p.
+struct InlineMatch {
+    enum Kind { Link, Url, Bold, Italic } kind;
+    std::u32string text, url;  // the visible text (inner text for Bold and Italic) and the link target
+    size_t end;
+};
 
-// One alternative of _INLINE matched at p: the HTML it becomes and where it ends.
-std::optional<std::pair<std::u32string, size_t>> inline_at(const std::u32string& t, size_t p) {
+std::optional<InlineMatch> inline_at(const std::u32string& t, size_t p) {
     size_t n = t.size();
     // \[(?P<lt>[^\]]+)\]\((?P<lu>https?://[^)\s]+)\)
     if (t[p] == '[') {
@@ -184,10 +188,8 @@ std::optional<std::pair<std::u32string, size_t>> inline_at(const std::u32string&
             size_t e = u;
             while (e < n && t[e] != ')' && !is_space(t[e]))
                 ++e;
-            if (e > u && e < n && t[e] == ')') {
-                std::u32string lt = t.substr(p + 1, close - p - 1), lu = t.substr(close + 2, e - close - 2);
-                return std::pair{U"<a href=\"" + html_escape(lu, true) + U"\">" + html_escape(lt, false) + U"</a>", e + 1};
-            }
+            if (e > u && e < n && t[e] == ')')
+                return InlineMatch{InlineMatch::Link, t.substr(p + 1, close - p - 1), t.substr(close + 2, e - close - 2), e + 1};
         }
     }
     // (?P<url>https?://[^\s<>\]\)]+)
@@ -195,10 +197,8 @@ std::optional<std::pair<std::u32string, size_t>> inline_at(const std::u32string&
         size_t e = u;
         while (e < n && !is_space(t[e]) && t[e] != '<' && t[e] != '>' && t[e] != ']' && t[e] != ')')
             ++e;
-        if (e > u) {
-            std::u32string esc = html_escape(t.substr(p, e - p), true);
-            return std::pair{U"<a href=\"" + esc + U"\">" + esc + U"</a>", e};
-        }
+        if (e > u)
+            return InlineMatch{InlineMatch::Url, t.substr(p, e - p), t.substr(p, e - p), e};
     }
     // \*\*(?P<b>.+?)\*\*
     if (t.compare(p, 2, U"**") == 0) {
@@ -206,7 +206,7 @@ std::optional<std::pair<std::u32string, size_t>> inline_at(const std::u32string&
             if (t[e - 1] == '\n')
                 break;
             if (t[e] == '*' && t[e + 1] == '*')
-                return std::pair{U"<b>" + inline_md(t.substr(p + 2, e - p - 2)) + U"</b>", e + 2};
+                return InlineMatch{InlineMatch::Bold, t.substr(p + 2, e - p - 2), {}, e + 2};
         }
     }
     // (?<![*\w])\*(?P<i>[^*\s][^*]*?)\*(?!\*)
@@ -216,7 +216,7 @@ std::optional<std::pair<std::u32string, size_t>> inline_at(const std::u32string&
         while (e < n && t[e] != '*')
             ++e;
         if (e < n && t[e] == '*' && !(e + 1 < n && t[e + 1] == '*'))
-            return std::pair{U"<i>" + inline_md(t.substr(p + 1, e - p - 1)) + U"</i>", e + 1};
+            return InlineMatch{InlineMatch::Italic, t.substr(p + 1, e - p - 1), {}, e + 1};
     }
     return std::nullopt;
 }
@@ -227,14 +227,46 @@ std::u32string inline_md(const std::u32string& text) {
     while (p < text.size()) {
         if (auto m = inline_at(text, p)) {
             out += html_escape(text.substr(pos, p - pos), false);
-            out += m->first;
-            pos = p = m->second;
+            switch (m->kind) {
+                case InlineMatch::Link:
+                    out += U"<a href=\"" + html_escape(m->url, true) + U"\">" + html_escape(m->text, false) + U"</a>";
+                    break;
+                case InlineMatch::Url:
+                    out += U"<a href=\"" + html_escape(m->url, true) + U"\">" + html_escape(m->url, true) + U"</a>";
+                    break;
+                case InlineMatch::Bold: out += U"<b>" + inline_md(m->text) + U"</b>"; break;
+                case InlineMatch::Italic: out += U"<i>" + inline_md(m->text) + U"</i>"; break;
+            }
+            pos = p = m->end;
         } else {
             ++p;
         }
     }
     out += html_escape(text.substr(pos), false);
     return out;
+}
+
+void inline_spans(const std::u32string& text, bool bold, bool italic, std::vector<Span>& out) {
+    size_t pos = 0, p = 0;
+    auto plain = [&](size_t a, size_t b) {
+        if (b > a)
+            out.push_back({utf8_encode(text.substr(a, b - a)), bold, italic, false});
+    };
+    while (p < text.size()) {
+        if (auto m = inline_at(text, p)) {
+            plain(pos, p);
+            switch (m->kind) {
+                case InlineMatch::Link:
+                case InlineMatch::Url: out.push_back({utf8_encode(m->text), bold, italic, true}); break;
+                case InlineMatch::Bold: inline_spans(m->text, true, italic, out); break;
+                case InlineMatch::Italic: inline_spans(m->text, bold, true, out); break;
+            }
+            pos = p = m->end;
+        } else {
+            ++p;
+        }
+    }
+    plain(pos, text.size());
 }
 
 std::vector<std::u32string> split_lines(const std::u32string& s) {
@@ -349,6 +381,12 @@ std::string md_to_html(std::string_view md_utf8) {
         html += out[k];
     }
     return utf8_encode(html + U"</body></html>");
+}
+
+std::vector<Span> inline_spans(std::string_view line) {
+    std::vector<Span> out;
+    inline_spans(utf8_decode(line), false, false, out);
+    return out;
 }
 
 std::string title_of(std::string_view md_utf8) {
