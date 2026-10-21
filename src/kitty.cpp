@@ -31,7 +31,8 @@ namespace {
 #include "diacritics.inc"
 
 constexpr int MAX_CELLS = static_cast<int>(sizeof DIACRITICS / sizeof DIACRITICS[0]);
-constexpr int MAX_PIXELS = 1600;  // larger decoded images are scaled down before sending
+constexpr int MAX_PIXELS = 1600;
+constexpr long long MAX_SOURCE_PIXELS = 50'000'000;  // larger images are not decoded (~200 MB as RGBA)  // larger decoded images are scaled down before sending
 
 std::string run(const char* cmd) {
     std::string out;
@@ -147,22 +148,34 @@ std::optional<Placed> Images::place(const std::string& key, const std::string& t
         std::string keys, payload;
         auto data = reinterpret_cast<const unsigned char*>(bytes.data());
         bool png = bytes.size() > 24 && bytes.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0;
-        if (png) {
-            s.width = data[16] << 24 | data[17] << 16 | data[18] << 8 | data[19];
-            s.height = data[20] << 24 | data[21] << 16 | data[22] << 8 | data[23];
+        long long png_w = png ? (long long)(data[16] << 24 | data[17] << 16 | data[18] << 8 | data[19]) : 0;
+        long long png_h = png ? (long long)(data[20] << 24 | data[21] << 16 | data[22] << 8 | data[23]) : 0;
+        if (png && std::max(png_w, png_h) <= MAX_PIXELS) {  // small enough to send as it is
+            s.width = static_cast<int>(png_w), s.height = static_cast<int>(png_h);
             keys = "f=100";
             payload = bytes;
         } else {
             int w = 0, h = 0, n = 0;
             unsigned char* rgba = nullptr;
             bool from_stb = true;
+            // The size first: decoding expands to 4 bytes a pixel before any resize, so a huge
+            // image is refused rather than decoded.
+            bool is_webp = type == "image/webp" || (bytes.size() > 12 && bytes.compare(8, 4, "WEBP") == 0);
+            int iw = 0, ih = 0, in = 0;
 #ifdef JOTMAIL_HAVE_WEBP
-            if (type == "image/webp" || (bytes.size() > 12 && bytes.compare(8, 4, "WEBP") == 0)) {
+            if (is_webp && !WebPGetInfo(data, bytes.size(), &iw, &ih))
+                iw = ih = 0;
+#endif
+            if (!is_webp && !stbi_info_from_memory(data, static_cast<int>(bytes.size()), &iw, &ih, &in))
+                iw = ih = 0;
+            bool too_big = static_cast<long long>(iw) * ih > MAX_SOURCE_PIXELS;
+#ifdef JOTMAIL_HAVE_WEBP
+            if (is_webp && !too_big && iw > 0) {
                 rgba = WebPDecodeRGBA(data, bytes.size(), &w, &h);
                 from_stb = false;
             }
 #endif
-            if (!rgba && from_stb)
+            if (!rgba && from_stb && !too_big && iw > 0)
                 rgba = stbi_load_from_memory(data, static_cast<int>(bytes.size()), &w, &h, &n, 4);
             if (rgba) {
                 std::vector<unsigned char> px(rgba, rgba + static_cast<size_t>(w) * h * 4);

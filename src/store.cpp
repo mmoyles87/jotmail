@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "store.hpp"
 
+#include <arpa/inet.h>
+
+#include <openssl/x509.h>
+#include <openssl/x509_vfy.h>
+#include <openssl/x509v3.h>
+
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -10,51 +16,103 @@
 #include <vmime/net/imap/IMAPCommand.hpp>
 #include <vmime/net/imap/IMAPConnection.hpp>
 #include <vmime/net/imap/IMAPFolder.hpp>
+#include <vmime/net/imap/IMAPFolderStatus.hpp>
 #include <vmime/net/imap/IMAPParser.hpp>
 #include <vmime/net/imap/IMAPSearchAttributes.hpp>
 #include <vmime/net/imap/IMAPStore.hpp>
 #include <vmime/net/imap/IMAPUtils.hpp>
 #include <vmime/platforms/posix/posixHandler.hpp>
-#include <vmime/security/cert/defaultCertificateVerifier.hpp>
+#include <vmime/security/cert/certificateException.hpp>
+#include <vmime/security/cert/certificateVerifier.hpp>
 #include <vmime/vmime.hpp>
 
 namespace jotmail {
 
 namespace {
 
-// Every certificate in a PEM file.
-std::vector<std::shared_ptr<vmime::security::cert::X509Certificate>> read_certs(const std::string& path) {
-    std::vector<std::shared_ptr<vmime::security::cert::X509Certificate>> certs;
-    std::ifstream f(path, std::ios::binary);
-    if (!f)
-        return certs;
-    std::string pem((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    vmime::security::cert::X509Certificate::import(reinterpret_cast<const vmime::byte_t*>(pem.data()), pem.size(), certs);
-    return certs;
-}
+const char* CA_BUNDLES[] = {
+    "/etc/ssl/certs/ca-certificates.crt",  // Arch, Debian, Ubuntu, Alpine
+    "/etc/pki/tls/certs/ca-bundle.crt",    // Fedora, RHEL
+    "/etc/ssl/cert.pem",                   // macOS, BSDs
+    "/opt/homebrew/etc/ca-certificates/cert.pem",
+    "/usr/local/etc/ca-certificates/cert.pem",
+};
 
-// The system's trusted roots. vmime verifies against an explicit list, not the OS store.
-std::vector<std::shared_ptr<vmime::security::cert::X509Certificate>> system_roots() {
-    static const char* bundles[] = {
-        "/etc/ssl/certs/ca-certificates.crt",  // Arch, Debian, Ubuntu, Alpine
-        "/etc/pki/tls/certs/ca-bundle.crt",    // Fedora, RHEL
-        "/etc/ssl/cert.pem",                   // macOS, BSDs
-        "/opt/homebrew/etc/ca-certificates/cert.pem",
-        "/usr/local/etc/ca-certificates/cert.pem",
-    };
-    std::vector<std::shared_ptr<vmime::security::cert::X509Certificate>> certs;
-    for (const char* path : bundles) {
-        std::ifstream f(path, std::ios::binary);
-        if (!f)
-            continue;
-        std::string pem((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-        vmime::security::cert::X509Certificate::import(
-            reinterpret_cast<const vmime::byte_t*>(pem.data()), pem.size(), certs);
-        if (!certs.empty())
-            return certs;
+// Verifies the server's certificate chain with OpenSSL itself: every signature up to a trusted
+// root, validity dates, the TLS server purpose, and the host name (RFC 6125, via
+// X509_VERIFY_PARAM_set1_host). vmime's own default verifier only checked issuer names between
+// links and signatures on the last one, which a forged leaf could get past.
+class OpenSslVerifier : public vmime::security::cert::certificateVerifier {
+public:
+    explicit OpenSslVerifier(std::string ca_file) : ca_file_(std::move(ca_file)) {}
+
+    void verify(const std::shared_ptr<vmime::security::cert::certificateChain>& chain, const std::string& hostname) override {
+        using vmime::security::cert::certificateException;
+        if (!chain || chain->getCount() == 0)
+            throw certificateException("the server sent no certificate");
+
+        std::vector<X509*> certs;
+        auto free_all = [&] {
+            for (X509* c : certs)
+                X509_free(c);
+        };
+        for (size_t i = 0; i < chain->getCount(); ++i) {
+            const vmime::byteArray der = chain->getAt(i)->getEncoded();
+            const unsigned char* p = der.data();
+            X509* c = d2i_X509(nullptr, &p, static_cast<long>(der.size()));
+            if (!c) {
+                free_all();
+                throw certificateException("the server sent an unreadable certificate");
+            }
+            certs.push_back(c);
+        }
+
+        X509_STORE* store = X509_STORE_new();
+        STACK_OF(X509)* untrusted = sk_X509_new_null();
+        X509_STORE_CTX* ctx = X509_STORE_CTX_new();
+        auto cleanup = [&] {
+            X509_STORE_CTX_free(ctx);
+            sk_X509_free(untrusted);  // the certificates themselves are freed by free_all
+            X509_STORE_free(store);
+            free_all();
+        };
+        bool roots = X509_STORE_set_default_paths(store) == 1;
+        for (const char* path : CA_BUNDLES)
+            if (std::filesystem::exists(path) && X509_STORE_load_file(store, path) == 1) {
+                roots = true;
+                break;
+            }
+        if (!ca_file_.empty() && X509_STORE_load_file(store, ca_file_.c_str()) != 1) {
+            cleanup();
+            throw certificateException("no certificates in ca_file " + ca_file_);
+        }
+        if (!roots && ca_file_.empty()) {
+            cleanup();
+            throw certificateException("no CA certificate bundle found");
+        }
+        for (size_t i = 1; i < certs.size(); ++i)
+            sk_X509_push(untrusted, certs[i]);
+
+        int ok = X509_STORE_CTX_init(ctx, store, certs[0], untrusted);
+        if (ok == 1) {
+            X509_STORE_CTX_set_purpose(ctx, X509_PURPOSE_SSL_SERVER);
+            X509_VERIFY_PARAM* param = X509_STORE_CTX_get0_param(ctx);
+            unsigned char ip[16];
+            bool is_ip = inet_pton(AF_INET, hostname.c_str(), ip) == 1 || inet_pton(AF_INET6, hostname.c_str(), ip) == 1;
+            ok = is_ip ? X509_VERIFY_PARAM_set1_ip_asc(param, hostname.c_str())
+                       : X509_VERIFY_PARAM_set1_host(param, hostname.c_str(), hostname.size());
+            if (ok == 1)
+                ok = X509_verify_cert(ctx);
+        }
+        std::string why = ok == 1 ? "" : X509_verify_cert_error_string(X509_STORE_CTX_get_error(ctx));
+        cleanup();
+        if (ok != 1)
+            throw certificateException("the server's certificate for " + hostname + " is not trusted: " + why);
     }
-    throw std::runtime_error("no CA certificate bundle found");
-}
+
+private:
+    std::string ca_file_;
+};
 
 }  // namespace
 
@@ -119,16 +177,7 @@ void Store::connect() {
     impl_->store->setProperty("auth.username", account_.user);
     impl_->store->setProperty("auth.password", run_password_command(account_.password_command));
 
-    auto roots = system_roots();
-    if (!account_.ca_file.empty()) {
-        auto extra = read_certs(account_.ca_file);
-        if (extra.empty())
-            throw std::runtime_error("no certificates in ca_file " + account_.ca_file);
-        roots.insert(roots.end(), extra.begin(), extra.end());
-    }
-    auto verifier = std::make_shared<vmime::security::cert::defaultCertificateVerifier>();
-    verifier->setX509RootCAs(roots);
-    impl_->store->setCertificateVerifier(verifier);
+    impl_->store->setCertificateVerifier(std::make_shared<OpenSslVerifier>(account_.ca_file));
 
     impl_->store->connect();
 
@@ -152,6 +201,7 @@ std::vector<RawNote> Store::fetch_all() {
         impl_->stale = false;
     }
     std::vector<RawNote> out;
+    loaded_validity_ = uid_validity();
     if (f->getMessageCount() == 0)
         return out;
 
@@ -176,6 +226,14 @@ std::vector<unsigned long> Store::search_header(const std::string& header, const
     for (auto& uid : f->getMessageUIDsMatchingSearchAttributes(sa))
         out.push_back(std::stoul(uid));
     return out;
+}
+
+unsigned long Store::uid_validity() {
+    connect();
+    auto status = vmime::dynamicCast<imap::IMAPFolderStatus>(impl_->folder->getStatus());
+    if (!status)
+        throw std::runtime_error("the server did not report the folder's UIDVALIDITY");
+    return status->getUIDValidity();
 }
 
 void Store::append(const std::string& raw) {
@@ -203,7 +261,8 @@ void Store::remove(const std::vector<unsigned long>& uids) {
     connect();
     std::string set = uid_set(uids);
     impl_->command("UID STORE " + set + " +FLAGS.SILENT (\\Deleted)");
-    impl_->command(impl_->conn()->hasCapability("UIDPLUS") ? "UID EXPUNGE " + set : "EXPUNGE");
+    if (impl_->conn()->hasCapability("UIDPLUS"))  // otherwise left marked: see store.hpp
+        impl_->command("UID EXPUNGE " + set);
     impl_->stale = true;
 }
 

@@ -54,7 +54,8 @@ Config Config::load(const std::filesystem::path& path) {
     for (auto& [key, node] : *accounts) {
         auto* a = node.as_table();
         if (!a)
-            continue;
+            throw std::runtime_error(path.string() + ": accounts." + std::string(key.str()) + " must be a table ([accounts." +
+                                     std::string(key.str()) + "])");
         Account acc;
         acc.name = std::string(key.str());
         auto need = [&](const char* field) {
@@ -74,6 +75,8 @@ Config Config::load(const std::filesystem::path& path) {
                 acc.ca_file = home + acc.ca_file.substr(1);
         c.accounts.emplace(acc.name, std::move(acc));
     }
+    if (c.accounts.empty())
+        throw std::runtime_error(path.string() + ": no [accounts.<name>] sections");
     if (c.default_account.empty())
         c.default_account = c.accounts.begin()->first;
     return c;

@@ -42,20 +42,30 @@ std::string sniff(const std::string& b) {
     return "";
 }
 
-// The image type to ask for from a list of offered types, PNG first.
+std::string shell_quote(const std::string& s) {
+    std::string out = "'";
+    for (char c : s)
+        out += c == '\'' ? std::string("'\\''") : std::string(1, c);
+    return out + "'";
+}
+
+// The image type to ask for from a list of offered types, in this order of preference. Only
+// these exact names are used: the list comes from whatever program owns the clipboard, and the
+// chosen name goes into a command line.
 std::string pick(const std::string& types) {
-    std::vector<std::string> images;
+    static const char* wanted[] = {"image/png", "image/jpeg", "image/webp", "image/gif"};
+    std::vector<std::string> offered;
     std::istringstream in(types);
     for (std::string t; std::getline(in, t);) {
         while (!t.empty() && (t.back() == '\r' || t.back() == ' '))
             t.pop_back();
-        if (t.starts_with("image/"))
-            images.push_back(t);
+        offered.push_back(t);
     }
-    for (auto& t : images)
-        if (t == "image/png")
-            return t;
-    return images.empty() ? "" : images.front();
+    for (const char* w : wanted)
+        for (auto& t : offered)
+            if (t == w)
+                return t;
+    return "";
 }
 
 ClipboardImage checked(std::optional<std::string> bytes, const std::string& how) {
@@ -90,13 +100,13 @@ ClipboardImage clipboard_image(const std::string& command) {
         return checked(capture(command), "paste_command");
 
     if (std::string wl = wayland_display(); !wl.empty() && have("wl-paste")) {
-        std::string env = "WAYLAND_DISPLAY='" + wl + "' ";
+        std::string env = "WAYLAND_DISPLAY=" + shell_quote(wl) + " ";
         auto types = capture(env + "wl-paste --list-types");
         if (types) {
             std::string type = pick(*types);
             if (type.empty())
                 throw std::runtime_error("the clipboard holds no image");
-            return checked(capture(env + "wl-paste --no-newline --type '" + type + "'"), "wl-paste");
+            return checked(capture(env + "wl-paste --no-newline --type " + shell_quote(type)), "wl-paste");
         }
     }
     if (const char* d = std::getenv("DISPLAY"); d && *d && have("xclip")) {
@@ -105,7 +115,7 @@ ClipboardImage clipboard_image(const std::string& command) {
             std::string type = pick(*types);
             if (type.empty())
                 throw std::runtime_error("the clipboard holds no image");
-            return checked(capture("xclip -selection clipboard -t '" + type + "' -o"), "xclip");
+            return checked(capture("xclip -selection clipboard -t " + shell_quote(type) + " -o"), "xclip");
         }
     }
     if (have("pngpaste"))

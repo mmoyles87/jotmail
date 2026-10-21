@@ -27,10 +27,18 @@ public:
     // UIDs of the messages whose `header` contains `value` (IMAP SEARCH HEADER).
     std::vector<unsigned long> search_header(const std::string& header, const std::string& value);
 
+    // The folder's UIDVALIDITY now. Message UIDs from a load are only meaningful while it is
+    // unchanged; a recreated or restored folder gets a new value.
+    unsigned long uid_validity();
+
+    // The UIDVALIDITY the last fetch_all() saw.
+    unsigned long loaded_validity() const { return loaded_validity_; }
+
     // APPEND a message to the folder, marked \Seen.
     void append(const std::string& raw);
 
-    // Remove messages for good: \Deleted, then UID EXPUNGE (or EXPUNGE when the server lacks UIDPLUS).
+    // Remove messages for good: \Deleted, then UID EXPUNGE. Without UIDPLUS they are only marked
+    // \Deleted: a plain EXPUNGE would also erase anything another client had marked.
     void remove(const std::vector<unsigned long>& uids);
 
     // Move messages to the special-use \Trash folder. Throws if the account has none.
@@ -42,6 +50,7 @@ private:
     struct Impl;
     Account account_;
     std::unique_ptr<Impl> impl_;
+    unsigned long loaded_validity_ = 0;
     void connect();
 };
 

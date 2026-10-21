@@ -245,6 +245,10 @@ private:
         std::string uuid = note ? note->uuid : "";
         try {
             notes_.save(note, text);
+        } catch (const BothKept& e) {
+            refresh(uuid);
+            status_ = std::string("saved, but ") + e.what();
+            return;
         } catch (const Conflict&) {
             auto kept = keep_unsaved(text);
             refresh(uuid);

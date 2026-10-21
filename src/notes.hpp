@@ -20,10 +20,18 @@ struct Note {
     std::string md;
     bool attachments = false;
     std::string raw;      // the whole message, kept for notes with attachments
+    unsigned long validity = 0;  // the folder's UIDVALIDITY when it was loaded
 };
 
-// The note changed on the server since it was loaded.
+// The note changed on the server since it was loaded (or was deleted there); nothing was saved.
 class Conflict : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+// The save went through, but another client saved the same note at the same moment. Both
+// versions are kept on the server; the newest one shows.
+class BothKept : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;
 };

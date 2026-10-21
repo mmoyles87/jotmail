@@ -144,9 +144,14 @@ int main(int argc, char** argv) {
             }
             try {
                 notes.save(&n, md);
+            } catch (const jotmail::BothKept& e) {
+                std::fprintf(stderr, "jotmail: saved, but %s\n", e.what());
             } catch (const jotmail::Conflict&) {
                 auto kept = jotmail::keep_unsaved(md);
                 throw std::runtime_error("the note changed on the server while you edited; not saved, your text is in " + kept.string());
+            } catch (const std::exception& e) {  // the editor's file is gone by now: keep the text
+                auto kept = jotmail::keep_unsaved(md);
+                throw std::runtime_error(std::string(e.what()) + "; not saved, your text is in " + kept.string());
             }
             return 0;
         }

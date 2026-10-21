@@ -336,6 +336,11 @@ std::string rebuild_note(const std::string& raw, const std::string& md, const st
         }
         if (type.empty())
             type = "text/plain";
+        // Only the HTML body and Content-ID'd attachments are rewritten or kept below; anything
+        // else (a nested multipart, a plain-text alternative) would be dropped, so refuse.
+        if (type.starts_with("multipart/") || (cid.empty() && type != "text/html"))
+            throw std::runtime_error("this note holds a " + type +
+                                     " part jotmail cannot rewrite without losing it; edit it on the phone");
 
         if (type == "text/html" && cid.empty()) {
             std::string fresh;
@@ -364,14 +369,34 @@ std::string rebuild_note(const std::string& raw, const std::string& md, const st
 }
 
 std::vector<Note> Notes::load() {
-    return parse_notes(store_.fetch_all());
+    auto notes = parse_notes(store_.fetch_all());
+    for (auto& n : notes)
+        n.validity = store_.loaded_validity();
+    return notes;
 }
 
+namespace {
+
+// A note's UIDs mean nothing once the folder has been recreated or restored on the server.
+void check_validity(Store& store, const Note& note) {
+    if (note.validity && store.uid_validity() != note.validity)
+        throw Conflict("the Notes folder was replaced on the server since it was loaded");
+}
+
+}  // namespace
+
 void Notes::save(const Note* note, const std::string& md) {
+    bool tracked = note && !note->uuid.starts_with("no-uuid-");
+    std::vector<unsigned long> before;
     if (note) {
-        auto found = store_.search_header(UUID_HDR, note->uuid);
-        if (!found.empty() && *std::max_element(found.begin(), found.end()) != note->uid)
-            throw Conflict(note->title);
+        check_validity(store_, *note);
+        if (tracked) {
+            before = store_.search_header(UUID_HDR, note->uuid);
+            if (before.empty())
+                throw Conflict(note->title + " was deleted on the server");
+            if (*std::max_element(before.begin(), before.end()) != note->uid)
+                throw Conflict(note->title);
+        }
     }
     auto [text, images] = attach_files(md, note ? attachment_ids(note->md) : std::vector<std::string>{});
     const std::string& user = store_.account().user;
@@ -380,16 +405,29 @@ void Notes::save(const Note* note, const std::string& md) {
     if (note && !note->raw.empty()) {
         raw = rebuild_note(note->raw, text, domain_of(user), now, images);
     } else {
-        std::string uuid = note && !note->uuid.starts_with("no-uuid-") ? note->uuid : new_uuid();
+        std::string uuid = tracked ? note->uuid : new_uuid();
         std::string created = note ? note->created : format_date(now);
         raw = build_note(text, uuid, created, user, now, images);
     }
     store_.append(raw);
-    if (note)
-        store_.remove({note->uid});
+    if (!note)
+        return;
+    if (tracked) {
+        // IMAP has no conditional APPEND, so look again: exactly one new copy (ours) means the
+        // old one can go. Any other new copy is a save from another device in the meantime;
+        // then nothing is removed and both stay.
+        auto after = store_.search_header(UUID_HDR, note->uuid);
+        size_t fresh = 0;
+        for (auto u : after)
+            fresh += std::find(before.begin(), before.end(), u) == before.end();
+        if (fresh != 1)
+            throw BothKept(note->title + " also changed on another device just now; both versions are kept");
+    }
+    store_.remove({note->uid});
 }
 
 void Notes::remove(const Note& note) {
+    check_validity(store_, note);
     // every copy of the note, so an older one does not take its place
     std::vector<unsigned long> uids{note.uid};
     if (!note.uuid.starts_with("no-uuid-"))
