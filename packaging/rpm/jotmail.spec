@@ -4,7 +4,7 @@
 %global vmime_commit 63ddb3b378487e7209ec3390cb33c6cde9bdec0a
 
 Name:           jotmail
-Version:        0.1.0
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        Notes from your IMAP mailbox, in a terminal
 License:        GPL-3.0-or-later AND MIT
@@ -71,5 +71,8 @@ tar xf %{SOURCE4}
 %{_mandir}/man1/jotmail.1*
 
 %changelog
+* Mon Oct 26 2026 Matt Moyles <matt@mattmoyles.com> - 0.1.1-1
+- Builds against OpenSSL 4 (Fedora 45, Ubuntu 26.10).
+
 * Mon Oct 26 2026 Matt Moyles <matt@mattmoyles.com> - 0.1.0-1
 - Initial release

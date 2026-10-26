@@ -40,8 +40,8 @@ sudo apt install jotmail
 **Debian** 13 and later:
 
 ```sh
-curl -LO https://github.com/mmoyles87/jotmail/releases/download/v0.1.0/jotmail_0.1.0-1_amd64.deb
-sudo apt install ./jotmail_0.1.0-1_amd64.deb
+curl -LO https://github.com/mmoyles87/jotmail/releases/download/v0.1.1/jotmail_0.1.1-1_amd64.deb
+sudo apt install ./jotmail_0.1.1-1_amd64.deb
 ```
 
 **Fedora** ([COPR](https://copr.fedorainfracloud.org/coprs/mmoyles87/jotmail/)):
