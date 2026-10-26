@@ -77,6 +77,11 @@ if(WEBP_FOUND)
 endif()
 
 add_executable(jotmail src/main.cpp src/tui.cpp)
+
+option(JOTMAIL_WERROR "Treat warnings in jotmail's own code as errors" OFF)
+foreach(target jotmail_core jotmail)
+  target_compile_options(${target} PRIVATE -Wall -Wextra $<$<BOOL:${JOTMAIL_WERROR}>:-Werror>)
+endforeach()
 target_compile_definitions(jotmail PRIVATE JOTMAIL_VERSION="${PROJECT_VERSION}")
 target_link_libraries(jotmail PRIVATE jotmail_core ftxui::component ftxui::dom ftxui::screen)
 

@@ -21,7 +21,7 @@ jobs:
     steps:
       - run: ${{ matrix.setup }}
       - uses: actions/checkout@v4
-      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DJOTMAIL_WERROR=ON
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
   macos:
