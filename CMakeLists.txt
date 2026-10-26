@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.28)
 project(jotmail VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -19,22 +19,26 @@ endif()
 FetchContent_Declare(ftxui
   GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI
   GIT_TAG v7.0.3
-  GIT_SHALLOW TRUE)
+  GIT_SHALLOW TRUE
+  EXCLUDE_FROM_ALL)
 
 FetchContent_Declare(tomlplusplus
   GIT_REPOSITORY https://github.com/marzer/tomlplusplus
   GIT_TAG v3.4.0
-  GIT_SHALLOW TRUE)
+  GIT_SHALLOW TRUE
+  EXCLUDE_FROM_ALL)
 
 # stb_image and stb_image_resize2, header-only.
 FetchContent_Declare(stb
   GIT_REPOSITORY https://github.com/nothings/stb
-  GIT_TAG 2c980bb59875b0d32144a71867fbdebb2f77cd20)
+  GIT_TAG 2c980bb59875b0d32144a71867fbdebb2f77cd20
+  EXCLUDE_FROM_ALL)
 
 # vmime has no recent release; pin a commit.
 FetchContent_Declare(vmime
   GIT_REPOSITORY https://github.com/kisli/vmime
-  GIT_TAG 63ddb3b378487e7209ec3390cb33c6cde9bdec0a)
+  GIT_TAG 63ddb3b378487e7209ec3390cb33c6cde9bdec0a
+  EXCLUDE_FROM_ALL)
 
 set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(FTXUI_BUILD_DOCS OFF CACHE BOOL "" FORCE)
@@ -73,7 +77,12 @@ if(WEBP_FOUND)
 endif()
 
 add_executable(jotmail src/main.cpp src/tui.cpp)
+target_compile_definitions(jotmail PRIVATE JOTMAIL_VERSION="${PROJECT_VERSION}")
 target_link_libraries(jotmail PRIVATE jotmail_core ftxui::component ftxui::dom ftxui::screen)
+
+include(GNUInstallDirs)
+install(TARGETS jotmail RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES doc/jotmail.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 
 # --- tests --------------------------------------------------------------------
 

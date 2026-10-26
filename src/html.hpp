@@ -17,9 +17,9 @@ using HtmlAttrs = std::vector<std::pair<std::u32string, std::optional<std::u32st
 class HtmlHandler {
 public:
     virtual ~HtmlHandler() = default;
-    virtual void start_tag(const std::u32string& tag, const HtmlAttrs& attrs) {}
-    virtual void end_tag(const std::u32string& tag) {}
-    virtual void data(const std::u32string& text) {}
+    virtual void start_tag(const std::u32string& /*tag*/, const HtmlAttrs& /*attrs*/) {}
+    virtual void end_tag(const std::u32string& /*tag*/) {}
+    virtual void data(const std::u32string& /*text*/) {}
 };
 
 // Feed the whole document and close, as HTMLParser.feed() followed by close().

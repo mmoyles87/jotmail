@@ -359,8 +359,8 @@ private:
         for (char c : url)
             quoted += c == '\'' ? std::string("'\\''") : std::string(1, c);
         quoted += "'";
-        std::system((opener + " " + quoted + " >/dev/null 2>&1 &").c_str());
-        status_ = "opened " + url;
+        int rc = std::system((opener + " " + quoted + " >/dev/null 2>&1 &").c_str());
+        status_ = (rc == 0 ? "opened " : "could not open ") + url;
     }
 
     bool on_event(const Event& e) {

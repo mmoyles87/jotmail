@@ -18,7 +18,7 @@ server component, and Apple Notes sees an edit made in jotmail as an edit, not a
 
 ## Build
 
-Needs a C++20 compiler, CMake 3.24+, OpenSSL, iconv and zlib; libwebp is used for WebP images
+Needs a C++20 compiler, CMake 3.28+, OpenSSL, iconv and zlib; libwebp is used for WebP images
 when present. FTXUI, toml++, vmime and stb are fetched at configure time.
 
 ```sh

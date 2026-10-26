@@ -1,0 +1,159 @@
+.TH JOTMAIL 1 2026-10-26 "jotmail 0.1.0" "User Commands"
+.SH NAME
+jotmail \- notes from your IMAP mailbox, in a terminal
+.SH SYNOPSIS
+.B jotmail
+[\fIoptions\fR]
+.br
+.B jotmail
+[\fIoptions\fR] \fBlist\fR
+.br
+.B jotmail
+[\fIoptions\fR] \fBshow\fR \fInote\fR
+.br
+.B jotmail
+[\fIoptions\fR] \fBnew\fR [\fIfile\fR]
+.br
+.B jotmail
+[\fIoptions\fR] \fBedit\fR \fInote\fR [\fIfile\fR]
+.br
+.B jotmail
+[\fIoptions\fR] \fBrm\fR \fInote\fR
+.br
+.B jotmail
+[\fIoptions\fR] \fBdump\fR \fIdir\fR
+.SH DESCRIPTION
+Apple Notes, Fastmail's web Notes and ImapNotes3 keep each note as an HTML
+message in a mail account's
+.B Notes
+folder.
+.B jotmail
+reads and writes that folder over IMAP, so a note edited in jotmail is seen
+elsewhere as an edit, not a duplicate.
+.PP
+Without a command, jotmail opens a two-pane browser: the notes on the left,
+the selected note on the right. Notes are edited as Markdown in
+.B $VISUAL
+or
+.BR $EDITOR .
+If a note changes on the server while it is open, the save is refused and the
+text is kept in
+.IR ~/.local/state/jotmail/ .
+.SH COMMANDS
+.TP
+.B list
+Number, date and title of every note, newest first.
+.TP
+.BI show " note"
+Print a note's text.
+.TP
+.BR new " [\fIfile\fR]"
+Add a note from
+.IR file ,
+or standard input.
+.TP
+.BR edit " \fInote\fR [\fIfile\fR]"
+Replace a note's text from
+.IR file ,
+or edit it in the editor.
+.TP
+.BI rm " note"
+Move a note to the folder marked \eTrash.
+.TP
+.BI dump " dir"
+Save every message as \fIdir\fR/\fIuid\fR.eml, byte for byte.
+.PP
+.I note
+is a number from
+.B list
+or the start of a note's UUID.
+.SH OPTIONS
+.TP
+.BR \-a ", " \-\-account " \fIname\fR"
+An account from the configuration. The default is the configuration's
+.BR default .
+.TP
+.BR \-f ", " \-\-folder " \fIname\fR"
+Another folder than the account's. The default is
+.BR Notes .
+.TP
+.BR \-h ", " \-\-help
+Print usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Print the version and exit.
+.SH KEYS
+.TP
+.BR j " " k ", arrows"
+Move.
+.TP
+.BR enter ", " e
+Edit the note.
+.TP
+.B n
+New note.
+.TP
+.B p
+Paste the clipboard's image into the note.
+.TP
+.B d d
+Move the note to Trash.
+.TP
+.B /
+Search titles and text;
+.B esc
+clears.
+.TP
+.BR J " " K ", " PgDn " " PgUp
+Scroll the note.
+.TP
+.B r
+Reload.
+.TP
+.B q
+Quit.
+.SH IMAGES
+An image in a note appears as an
+.BI [attachment: id ]
+line. Keep the line to keep the image; delete it to drop the image. A line
+naming a file path
+.RB ( / ,
+.BR ~ ,
+.B ./
+or
+.BR ../ )
+attaches that PNG, JPEG, GIF, WebP or HEIC file when the note is saved.
+Images are drawn in kitty and Ghostty with the kitty graphics protocol,
+including inside tmux with
+.B allow\-passthrough
+on.
+.SH FILES
+.TP
+.I ~/.config/jotmail/config.toml
+Accounts and settings, for example:
+.PP
+.RS
+.nf
+default = "personal"
+images = "auto"          # "auto", "kitty" or "off"
+mouse = true
+
+[accounts.personal]
+host = "imap.example.com"
+port = 993
+user = "me@example.com"
+password_command = "pass show mail/me@example.com"
+folder = "Notes"
+# ca_file = "~/certs/my-ca.pem"
+
+[theme]
+preset = "forest"        # forest, gruvbox, nord or terminal
+.fi
+.RE
+.PP
+.B password_command
+runs through
+.BR /bin/sh ;
+the first line of its output is the password.
+.SH SEE ALSO
+https://github.com/mmoyles87/jotmail

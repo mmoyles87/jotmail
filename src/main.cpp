@@ -37,6 +37,7 @@ options:
   -a, --account NAME   an account from the config (default: the config's `default`)
   -f, --folder NAME    another folder than the account's (default: Notes)
   -h, --help
+  -V, --version
 
 Accounts are read from ~/.config/jotmail/config.toml.
 )";
@@ -91,6 +92,9 @@ int main(int argc, char** argv) {
             folder = args[1];
         } else if (args[0] == "-h" || args[0] == "--help") {
             std::fputs(USAGE, stdout);
+            return 0;
+        } else if (args[0] == "-V" || args[0] == "--version") {
+            std::puts("jotmail " JOTMAIL_VERSION);
             return 0;
         } else {
             std::fputs(USAGE, stderr);
