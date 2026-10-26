@@ -8,13 +8,51 @@ Android. All of them keep each note as an HTML message in the account's `Notes` 
 format Apple Notes defined. jotmail reads and writes that folder directly: no sync service, no
 server component, and Apple Notes sees an edit made in jotmail as an edit, not a duplicate.
 
-![jotmail showing a note with an image](docs/screenshot.png)
+![jotmail showing a note with an image](doc/screenshot.png)
 
 - Browse, search, edit and delete notes in a two-pane terminal UI; notes open in `$EDITOR` as Markdown.
 - Images in notes are shown inline in kitty and Ghostty, including inside tmux. Add one by
   pasting it from the clipboard, or by writing its path in the note.
 - If a note changes elsewhere while you edit it, the save is refused and your text is kept.
 - Scriptable: `list`, `show`, `new`, `edit` and `rm` work without the UI.
+
+## Install
+
+**Arch Linux** (AUR):
+
+```sh
+yay -S jotmail        # or: paru -S jotmail
+```
+
+**macOS** (Homebrew):
+
+```sh
+brew install mmoyles87/tap/jotmail
+```
+
+**Ubuntu** 24.04 and later ([PPA](https://launchpad.net/~mattmoyles/+archive/ubuntu/jotmail)):
+
+```sh
+sudo add-apt-repository ppa:mattmoyles/jotmail
+sudo apt install jotmail
+```
+
+**Debian** 13 and later:
+
+```sh
+curl -LO https://github.com/mmoyles87/jotmail/releases/download/v0.1.0/jotmail_0.1.0-1_amd64.deb
+sudo apt install ./jotmail_0.1.0-1_amd64.deb
+```
+
+**Fedora** ([COPR](https://copr.fedorainfracloud.org/coprs/mmoyles87/jotmail/)):
+
+```sh
+sudo dnf copr enable mmoyles87/jotmail
+sudo dnf install jotmail
+```
+
+ARM64 builds (`arm64.deb`, `aarch64.rpm`) are on the
+[releases page](https://github.com/mmoyles87/jotmail/releases) too.
 
 ## Build
 

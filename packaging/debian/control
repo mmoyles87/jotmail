@@ -1,0 +1,25 @@
+Source: jotmail
+Section: utils
+Priority: optional
+Maintainer: Matt Moyles <matt@mattmoyles.com>
+Build-Depends: debhelper-compat (= 13), cmake (>= 3.28), ninja-build, pkgconf,
+ libssl-dev, zlib1g-dev, libwebp-dev, libgtest-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/mmoyles87/jotmail
+Vcs-Browser: https://github.com/mmoyles87/jotmail
+Vcs-Git: https://github.com/mmoyles87/jotmail.git
+Rules-Requires-Root: no
+
+Package: jotmail
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: wl-clipboard | xclip
+Description: notes from your IMAP mailbox, in a terminal
+ Apple Notes, Fastmail's web Notes and ImapNotes3 keep each note as an HTML
+ message in a mail account's Notes folder. jotmail reads and writes that
+ folder over IMAP, so Apple Notes sees an edit made in jotmail as an edit,
+ not a duplicate.
+ .
+ It has a two-pane terminal browser with search, edits notes as Markdown in
+ your editor, shows images inline in kitty and Ghostty, and has a command
+ line for scripts.
