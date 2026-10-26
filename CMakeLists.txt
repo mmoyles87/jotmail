@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(jotmail VERSION 0.1.0 LANGUAGES CXX)
+project(jotmail VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,6 +59,13 @@ set(VMIME_HAVE_MESSAGING_PROTO_MAILDIR OFF CACHE BOOL "" FORCE)
 set(VMIME_HAVE_MESSAGING_PROTO_SENDMAIL OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(ftxui tomlplusplus vmime stb)
+
+# OpenSSL 4 has no engines, which vmime still asks OPENSSL_init_ssl() to load, and returns
+# const X509_NAME*, which vmime keeps in a non-const pointer to read from
+if(OPENSSL_VERSION VERSION_GREATER_EQUAL 4)
+  target_compile_definitions(vmime-static PRIVATE OPENSSL_INIT_ENGINE_OPENSSL=0 OPENSSL_INIT_ENGINE_ALL_BUILTIN=0)
+  target_compile_options(vmime-static PRIVATE -fpermissive)
+endif()
 
 # --- jotmail ------------------------------------------------------------------
 
