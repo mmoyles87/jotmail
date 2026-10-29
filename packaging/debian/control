@@ -1,7 +1,7 @@
 Source: jotmail
 Section: utils
 Priority: optional
-Maintainer: Matt Moyles <matt@mattmoyles.com>
+Maintainer: Matt Moyles <matt@moyles.xyz>
 Build-Depends: debhelper-compat (= 13), cmake (>= 3.28), ninja-build, pkgconf,
  libssl-dev, zlib1g-dev, libwebp-dev, libgtest-dev
 Standards-Version: 4.6.2
